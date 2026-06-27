@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>粒径计数台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">LOCAL PARTICLE METROLOGY</p>
+      <h1>粒径计数台</h1>
+    </div>
+    <div class="local-badge"><span></span>图片仅在本机处理</div>
+  </header>
+
+  <main class="workspace">
+    <aside class="control-panel">
+      <section class="panel-section upload-section">
+        <div class="section-heading">
+          <span class="step">输入</span>
+          <h2>检测图片</h2>
+        </div>
+        <label class="drop-zone" id="dropZone" for="imageInput">
+          <input id="imageInput" type="file" accept="image/*">
+          <span class="drop-icon">＋</span>
+          <strong>拖入或选择图片</strong>
+          <small>支持 JPG、PNG、TIFF、BMP，建议保留原图分辨率</small>
+        </label>
+        <p class="file-name" id="fileName">尚未选择图片</p>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading">
+          <span class="step">模板</span>
+          <h2>相机与滤膜参数</h2>
+        </div>
+        <div class="template-picker">
+          <select id="templateSelect" aria-label="参数模板">
+            <option value="">默认参数</option>
+          </select>
+          <button id="deleteTemplate" class="quiet-button" type="button" disabled>删除</button>
+        </div>
+        <div class="template-save-row">
+          <input id="templateName" type="text" maxlength="30" placeholder="例如：显微镜 A · 白膜">
+          <button id="saveTemplate" class="quiet-button" type="button">保存当前参数</button>
+        </div>
+        <p class="template-message" id="templateMessage" role="status"></p>
+        <p class="hint">模板只保存在当前浏览器，不会随检测图片导出。</p>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading">
+          <span class="step">校准</span>
+          <h2>黄色比例尺</h2>
+        </div>
+        <div class="field-grid two">
+          <label>标注长度 <span>μm</span><input id="scaleUm" type="number" value="500" min="1"></label>
+          <label>黄线间距 <span>px</span><input id="scalePx" type="number" placeholder="自动识别" min="1" step="0.1"></label>
+        </div>
+        <p class="hint">留空像素间距时，软件自动读取右下角两条黄色竖线的中心距。</p>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading">
+          <span class="step">区域</span>
+          <h2>圆形统计边界</h2>
+        </div>
+        <div class="slider-grid">
+          <label>中心 X <output id="cxOut">49%</output><input id="centerX" type="range" min="40" max="60" value="49" step="0.1"></label>
+          <label>中心 Y <output id="cyOut">49%</output><input id="centerY" type="range" min="40" max="60" value="49" step="0.1"></label>
+          <label>水平半径 <output id="rxOut">47%</output><input id="radiusX" type="range" min="35" max="50" value="47" step="0.1"></label>
+          <label>垂直半径 <output id="ryOut">46%</output><input id="radiusY" type="range" min="35" max="50" value="46" step="0.1"></label>
+        </div>
+        <p class="hint">蓝线应落在圆形区域边缘内侧。可在原图预览中即时调整。</p>
+      </section>
+
+      <details class="advanced panel-section">
+        <summary>识别灵敏度</summary>
+        <div class="field-grid two advanced-fields">
+          <label>颗粒边缘<input id="edgeThreshold" type="number" value="20" min="5" max="80"></label>
+          <label>深色核心<input id="seedThreshold" type="number" value="40" min="10" max="120"></label>
+        </div>
+        <label class="full-field">圆边内缩 <span>μm</span><input id="guardUm" type="number" value="130" min="0"></label>
+        <p class="hint">默认参数已经针对白色滤膜上的深色颗粒调校。</p>
+      </details>
+
+      <button class="analyze-button" id="analyzeButton" disabled>
+        <span>开始统计</span><b>→</b>
+      </button>
+      <p class="error-message" id="errorMessage" role="alert"></p>
+    </aside>
+
+    <section class="stage-column">
+      <div class="stage" id="stage">
+        <div class="empty-state" id="emptyState">
+          <div class="caliper-mark"><i></i><i></i></div>
+          <h2>把滤膜放上计数台</h2>
+          <p>选择图片后，在这里校准统计边界并检查最终标注。</p>
+        </div>
+        <div class="image-frame hidden" id="imageFrame">
+          <img id="previewImage" alt="检测图片预览">
+          <div class="region-overlay" id="regionOverlay"></div>
+        </div>
+        <div class="processing hidden" id="processing">
+          <div class="scan-line"></div>
+          <p>正在识别深色颗粒并测量最大长度…</p>
+        </div>
+      </div>
+
+      <section class="results hidden" id="results">
+        <div class="result-head">
+          <div>
+            <p class="eyebrow">MEASUREMENT COMPLETE</p>
+            <h2>统计结果</h2>
+          </div>
+          <div class="calibration-readout" id="calibrationReadout"></div>
+        </div>
+
+        <div class="bin-rail">
+          <article class="bin green"><span>25–50 μm</span><strong id="count0">0</strong></article>
+          <article class="bin amber"><span>50–100 μm</span><strong id="count1">0</strong></article>
+          <article class="bin red"><span>100–200 μm</span><strong id="count2">0</strong></article>
+          <article class="bin violet"><span>＞200 μm</span><strong id="count3">0</strong></article>
+          <article class="bin total"><span>合计</span><strong id="countTotal">0</strong></article>
+        </div>
+
+        <div class="download-row">
+          <a id="downloadBundle" class="primary-download">下载结果包</a>
+          <a id="downloadAnnotated">标注原图</a>
+          <a id="downloadSummary">汇总 CSV</a>
+          <a id="downloadMeasurements">颗粒明细</a>
+        </div>
+        <div class="legend">
+          <span><i class="green"></i>25–50</span>
+          <span><i class="amber"></i>50–100</span>
+          <span><i class="red"></i>100–200</span>
+          <span><i class="violet"></i>＞200 μm</span>
+          <span><i class="blue"></i>统计边界</span>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

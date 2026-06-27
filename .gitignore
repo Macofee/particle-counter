@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# 本地检测图片与生成结果
+data/
+
+# 本机开发与浏览器 QA 状态
+.claude/
+.gstack/
