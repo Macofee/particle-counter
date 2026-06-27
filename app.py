@@ -18,9 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from engine import AnalysisSettings, analyze_image
+from engine import ALGORITHM_VERSION, AnalysisSettings, analyze_image
 from review import apply_review_action
 
+SOFTWARE_VERSION = "1.0.0"
 
 ROOT = Path(__file__).resolve().parent
 STATIC = Path(getattr(sys, "_MEIPASS", ROOT)) / "static"
@@ -91,7 +92,7 @@ def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dic
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ParticleCounter/1.0"
+    server_version = f"ParticleCounter/{SOFTWARE_VERSION}"
 
     def log_message(self, fmt: str, *args) -> None:
         print(f"[{self.log_date_time_string()}] {fmt % args}")
@@ -123,7 +124,13 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         if path == "/api/health":
-            self.send_json({"ok": True})
+            self.send_json(
+                {
+                    "ok": True,
+                    "version": SOFTWARE_VERSION,
+                    "algorithm_version": ALGORITHM_VERSION,
+                }
+            )
             return
         if path.startswith("/files/"):
             parts = path.strip("/").split("/")
