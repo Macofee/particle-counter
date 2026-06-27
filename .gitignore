@@ -10,6 +10,20 @@ build/
 dist/
 *.spec
 
+# Python 缓存与虚拟环境
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# IDE 与编辑器
+.vscode/
+.idea/
+
+# 环境变量
+.env
+*.log
+
 # 本机开发与浏览器 QA 状态
 .claude/
 .gstack/
