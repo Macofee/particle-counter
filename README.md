@@ -124,3 +124,30 @@ packaging\build_windows_app.bat
 | `engine.py` | `analyze_image` 拆分为 `_read_and_normalize` + `_make_ellipse_mask` + `_write_result_files`，主函数 230→134 行 |
 | `app.py` | 分析完成后 `finally` 清理上传原图，避免磁盘占用增长 |
 | `requirements.txt` | `numpy>=1.24,<3` / `opencv-python>=4.8,<5` 添加版本上限 |
+
+#### 第四轮（提交 `d49dcdf`）
+
+| 文件 | 修复内容 |
+|------|----------|
+| `static/styles.css` | 新增 `.zoom-toolbar` 控件样式 |
+| `static/index.html` | stage 区域加入缩放工具条（− / 百分比 / ＋） |
+| `static/app.js` | 实现 25%–400% 步进缩放、Command/Ctrl+滚轮缩放、重置适配窗口 |
+
+#### 第五轮（提交 `1cc264f`）
+
+| 文件 | 修复内容 |
+|------|----------|
+| `app.py` | 新增 `_get_app_data_dir()`，按 Windows/macOS/Linux 选择应用数据目录 |
+| `reporting.py` | 字体候选列表添加 4 个 Windows 中文字体（微软雅黑、黑体、宋体） |
+| `启动颗粒度计数台.bat` | 新建 Windows 启动脚本（UTF-8 编码，自动安装依赖） |
+| `packaging/build_windows_app.bat` | 新建 Windows PyInstaller 打包脚本 |
+| `README.md` | 启动与构建章节增加 Windows 说明 |
+
+#### 其他
+
+| 提交 | 说明 |
+|------|------|
+| `f8b7c6b` / `cb318d7` | `.gitignore` 补充 `.pytest_cache`、`venv`、`.vscode`、`.idea`、`.env`、`*.log` |
+| `f6e63ee` / `d4f357e` / `8d282d3` / `8782fc0` / `012eb62` | 人工复核、PDF 报告、批量处理、macOS 打包（由其他会话完成） |
+
+测试覆盖：当前共 **27** 个测试全部通过，覆盖引擎核心、黄色检测、图像归一化、复核流程、批量处理和计量验证。
