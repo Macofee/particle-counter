@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from engine import AnalysisSettings, analyze_image
+from review import apply_review_action
 
 
 ROOT = Path(__file__).resolve().parent
@@ -27,6 +28,18 @@ UPLOADS.mkdir(parents=True, exist_ok=True)
 RESULTS.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 350 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+MAX_REVIEW_BYTES = 64 * 1024
+JOB_LOCKS: dict[str, threading.Lock] = {}
+
+
+def result_files(job_id: str) -> dict[str, str]:
+    return {
+        "preview": f"/files/{job_id}/preview.jpg",
+        "annotated": f"/files/{job_id}/annotated.jpg",
+        "summary": f"/files/{job_id}/summary.csv",
+        "measurements": f"/files/{job_id}/measurements.csv",
+        "bundle": f"/files/{job_id}/result_bundle.zip",
+    }
 
 
 def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dict]:
@@ -110,12 +123,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_file(candidate)
 
     def do_POST(self) -> None:
-        if self.path != "/api/analyze":
+        if self.path not in {"/api/analyze", "/api/review"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         # 轻量 CSRF 防护：拒绝跨站 POST 请求
         if self.headers.get("Sec-Fetch-Site") == "cross-site":
             self.send_json({"error": "不允许的外部请求"}, status=403)
+            return
+        if self.path == "/api/review":
+            self.handle_review()
             return
         image_path = None
         try:
@@ -178,13 +194,7 @@ class Handler(BaseHTTPRequestHandler):
 
             result = analyze_image(image_path, RESULTS / job_id, settings)
             result["job_id"] = job_id
-            result["files"] = {
-                "preview": f"/files/{job_id}/preview.jpg",
-                "annotated": f"/files/{job_id}/annotated.jpg",
-                "summary": f"/files/{job_id}/summary.csv",
-                "measurements": f"/files/{job_id}/measurements.csv",
-                "bundle": f"/files/{job_id}/result_bundle.zip",
-            }
+            result["files"] = result_files(job_id)
             self.send_json(result)
         except ValueError as error:
             self.send_json({"error": str(error)}, status=400)
@@ -196,6 +206,32 @@ class Handler(BaseHTTPRequestHandler):
                     image_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def handle_review(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > MAX_REVIEW_BYTES:
+                raise ValueError("人工复核请求为空或过大。")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            job_id = str(payload.get("job_id", ""))
+            if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+                raise ValueError("结果任务编号无效。")
+            action = payload.get("action")
+            if not isinstance(action, dict):
+                raise ValueError("人工复核操作无效。")
+            result_dir = RESULTS / job_id
+            if not result_dir.is_dir():
+                raise ValueError("未找到待复核的分析结果。")
+            lock = JOB_LOCKS.setdefault(job_id, threading.Lock())
+            with lock:
+                result = apply_review_action(result_dir, action, str(payload.get("actor", "操作员")))
+            result["job_id"] = job_id
+            result["files"] = result_files(job_id)
+            self.send_json(result)
+        except (ValueError, json.JSONDecodeError) as error:
+            self.send_json({"error": str(error)}, status=400)
+        except Exception as error:
+            self.send_json({"error": f"人工复核失败：{error}"}, status=500)
 
 
 def open_browser(port: int) -> None:

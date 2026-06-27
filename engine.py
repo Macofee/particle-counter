@@ -279,13 +279,35 @@ def _write_result_files(
         with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
             writer = csv.DictWriter(
                 file,
-                fieldnames=["编号", "center_x_px", "center_y_px", "length_px", "length_um", "pixel_area", "bin"],
+                fieldnames=[
+                    "编号",
+                    "particle_id",
+                    "source",
+                    "center_x_px",
+                    "center_y_px",
+                    "length_px",
+                    "length_um",
+                    "pixel_area",
+                    "bin",
+                ],
             )
             writer.writeheader()
             for index, record in enumerate(
                 sorted(records, key=lambda item: (item["center_y_px"], item["center_x_px"])), 1
             ):
-                writer.writerow({"编号": index, **record})
+                writer.writerow(
+                    {
+                        "编号": index,
+                        "particle_id": record["id"],
+                        "source": record["source"],
+                        "center_x_px": record["center_x_px"],
+                        "center_y_px": record["center_y_px"],
+                        "length_px": record["length_px"],
+                        "length_um": record["length_um"],
+                        "pixel_area": record["pixel_area"],
+                        "bin": record["bin"],
+                    }
+                )
     except OSError:
         raise
     except Exception as exc:
@@ -398,12 +420,15 @@ def analyze_image(
         cv2.drawContours(annotated, [contour_full], -1, color_bgr, _CONTOUR_THICKNESS, cv2.LINE_AA)
         records.append(
             {
+                "id": f"auto-{int(label_id)}",
+                "source": "automatic",
                 "center_x_px": int(round(centroids[label_id][0])) + x0,
                 "center_y_px": int(round(centroids[label_id][1])) + y0,
                 "length_px": round(length_px, 3),
                 "length_um": round(length_um, 2),
                 "pixel_area": int(pixel_area),
                 "bin": BIN_DEFINITIONS[bin_index][2],
+                "contour_px": contour_full.reshape(-1, 2).tolist(),
             }
         )
 
@@ -439,6 +464,13 @@ def analyze_image(
             "radius_y_px": effective_ry,
         },
         "settings": asdict(settings),
+        "particles": records,
+        "review_audit": [],
     }
+    _checked_imwrite(
+        result_dir / "source.png",
+        image,
+        [cv2.IMWRITE_PNG_COMPRESSION, 3],
+    )
     _write_result_files(result_dir, annotated, records, counts, result, scale_px, width, height, settings)
     return result

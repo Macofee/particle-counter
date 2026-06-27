@@ -191,6 +191,17 @@ input[type="range"] { grid-column: 1 / -1; accent-color: var(--blue); width: 100
 .bin span { display: block; color: var(--muted); font: 11px monospace; }
 .bin strong { display: block; margin-top: 5px; color: var(--ink); font: 700 28px/1 "SFMono-Regular", monospace; }
 .bin.green { color: var(--green); }.bin.amber { color: var(--amber); }.bin.red { color: var(--red); }.bin.violet { color: var(--violet); }.bin.total { color: var(--blue); background: #eef4f6; }
+.review-panel { margin-top: 18px; padding: 16px; border: 1px solid var(--line); background: #f2f6f7; }
+.review-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+.review-heading h3 { margin: 4px 0 0; font-size: 15px; }
+.review-heading label { width: min(220px, 45%); }
+.review-heading input, .review-actions input { width: 100%; margin-top: 5px; padding: 8px 9px; border: 1px solid var(--line); background: white; }
+.review-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.review-actions label { width: 145px; }
+.review-actions .active { color: white; border-color: var(--blue); background: var(--blue); }
+.review-message { margin: 10px 0 0; min-height: 17px; color: var(--muted); font-size: 11px; }
+.review-message.error { color: var(--red); }
+.image-frame.reviewing { cursor: crosshair; }
 .download-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-top: 18px; }
 .download-row a { color: var(--blue-dark); font-size: 12px; text-decoration: none; cursor: pointer; border-bottom: 1px solid #9bb1ba; }
 .download-row .primary-download { padding: 10px 14px; color: white; background: var(--blue-dark); border: 0; }
@@ -216,6 +227,8 @@ input[type="range"] { grid-column: 1 / -1; accent-color: var(--blue); width: 100
   .workspace { padding: 14px; }
   .field-grid.two, .slider-grid { grid-template-columns: 1fr; }
   .template-save-row { grid-template-columns: 1fr; }
+  .review-heading { align-items: stretch; flex-direction: column; }
+  .review-heading label { width: 100%; }
   .bin-rail { grid-template-columns: 1fr; }
   .bin.total { grid-column: auto; }
 }

@@ -122,6 +122,23 @@
           <article class="bin total"><span>合计</span><strong id="countTotal">0</strong></article>
         </div>
 
+        <section class="review-panel" id="reviewPanel">
+          <div class="review-heading">
+            <div>
+              <span class="step">复核</span>
+              <h3>人工修正颗粒</h3>
+            </div>
+            <label>操作员<input id="reviewActor" type="text" maxlength="80" placeholder="姓名或工号"></label>
+          </div>
+          <div class="review-actions">
+            <button id="removeParticle" class="quiet-button" type="button">点击删除颗粒</button>
+            <label>新增颗粒尺寸 <span>μm</span><input id="manualLength" type="number" value="50" min="25.01" step="0.1"></label>
+            <button id="addParticle" class="quiet-button" type="button">点击新增颗粒</button>
+            <button id="undoReview" class="quiet-button" type="button">撤销上一步</button>
+          </div>
+          <p class="review-message" id="reviewMessage" role="status">选择操作后，在标注图中点击目标位置。</p>
+        </section>
+
         <div class="download-row">
           <a id="downloadBundle" class="primary-download">下载结果包</a>
           <a id="downloadAnnotated">标注原图</a>

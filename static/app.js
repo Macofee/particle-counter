@@ -59,6 +59,8 @@ const errorMessage = $('#errorMessage');
 let selectedFile = null;
 let sourceUrl = null;
 let showingResult = false;
+let currentResult = null;
+let reviewMode = null;
 
 const parameterIds = [
   'scaleUm', 'scalePx', 'centerX', 'centerY', 'radiusX', 'radiusY',
@@ -90,9 +92,97 @@ function markParametersDirty() {
   if (!selectedFile) return;
   if (showingResult) previewImage.src = sourceUrl;
   showingResult = false;
+  currentResult = null;
+  setReviewMode(null);
   regionOverlay.classList.remove('hidden');
   results.classList.add('hidden');
 }
+
+function setReviewMode(mode) {
+  reviewMode = mode;
+  $('#removeParticle').classList.toggle('active', mode === 'remove');
+  $('#addParticle').classList.toggle('active', mode === 'add');
+  imageFrame.classList.toggle('reviewing', Boolean(mode));
+  if (mode === 'remove') showReviewMessage('请在标注图中点击要删除的颗粒。');
+  if (mode === 'add') showReviewMessage('请在标注图中点击漏检颗粒的中心。');
+}
+
+function showReviewMessage(message, isError = false) {
+  const element = $('#reviewMessage');
+  element.textContent = message;
+  element.classList.toggle('error', isError);
+}
+
+function renderResult(data) {
+  currentResult = data;
+  previewImage.src = `${data.files.preview}?t=${Date.now()}`;
+  showingResult = true;
+  regionOverlay.classList.add('hidden');
+  renderBins(data.bins);
+  $('#countTotal').textContent = data.total.toLocaleString('zh-CN');
+  $('#calibrationReadout').replaceChildren(
+    createSpan(`${data.scale_px} px = ${data.scale_um} μm`),
+    createSpan(`1 px = ${data.um_per_px} μm · 算法 ${data.algorithm_version}`),
+  );
+  $('#downloadBundle').href = data.files.bundle;
+  $('#downloadAnnotated').href = data.files.annotated;
+  $('#downloadSummary').href = data.files.summary;
+  $('#downloadMeasurements').href = data.files.measurements;
+  const activeActions = (data.review_audit || []).filter((item) => !item.undone).length;
+  showReviewMessage(activeActions ? `已记录 ${activeActions} 项人工修正。` : '选择操作后，在标注图中点击目标位置。');
+  results.classList.remove('hidden');
+}
+
+async function submitReview(action) {
+  if (!currentResult) return;
+  setReviewMode(null);
+  processing.classList.remove('hidden');
+  try {
+    const response = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_id: currentResult.job_id,
+        actor: $('#reviewActor').value,
+        action,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '人工复核失败。');
+    renderResult(data);
+  } catch (error) {
+    showReviewMessage(error.message, true);
+  } finally {
+    processing.classList.add('hidden');
+  }
+}
+
+$('#removeParticle').addEventListener('click', () => setReviewMode(reviewMode === 'remove' ? null : 'remove'));
+$('#addParticle').addEventListener('click', () => setReviewMode(reviewMode === 'add' ? null : 'add'));
+$('#undoReview').addEventListener('click', () => submitReview({ type: 'undo' }));
+
+previewImage.addEventListener('click', (event) => {
+  if (!reviewMode || !currentResult) return;
+  const bounds = previewImage.getBoundingClientRect();
+  const x = (event.clientX - bounds.left) / bounds.width * currentResult.image.width;
+  const y = (event.clientY - bounds.top) / bounds.height * currentResult.image.height;
+  if (reviewMode === 'add') {
+    submitReview({ type: 'add', x_px: x, y_px: y, length_um: Number($('#manualLength').value) });
+    return;
+  }
+  const threshold = 18 / bounds.width * currentResult.image.width;
+  const nearest = currentResult.particles
+    .map((particle) => ({
+      particle,
+      distance: Math.hypot(particle.center_x_px - x, particle.center_y_px - y),
+    }))
+    .sort((left, right) => left.distance - right.distance)[0];
+  if (!nearest || nearest.distance > threshold) {
+    showReviewMessage('点击位置附近没有颗粒，请靠近彩色轮廓重试。', true);
+    return;
+  }
+  submitReview({ type: 'remove', particle_id: nearest.particle.id });
+});
 
 parameterIds.forEach((inputId) => $(`#${inputId}`).addEventListener('input', () => {
   updateRegion();
@@ -244,20 +334,7 @@ analyzeButton.addEventListener('click', async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '分析失败。');
 
-    previewImage.src = `${data.files.preview}?t=${Date.now()}`;
-    showingResult = true;
-    regionOverlay.classList.add('hidden');
-    renderBins(data.bins);
-    $('#countTotal').textContent = data.total.toLocaleString('zh-CN');
-    $('#calibrationReadout').replaceChildren(
-      createSpan(`${data.scale_px} px = ${data.scale_um} μm`),
-      createSpan(`1 px = ${data.um_per_px} μm`),
-    );
-    $('#downloadBundle').href = data.files.bundle;
-    $('#downloadAnnotated').href = data.files.annotated;
-    $('#downloadSummary').href = data.files.summary;
-    $('#downloadMeasurements').href = data.files.measurements;
-    results.classList.remove('hidden');
+    renderResult(data);
     results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (error) {
     errorMessage.textContent = error.message;
