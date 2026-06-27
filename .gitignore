@@ -27,3 +27,19 @@ venv/
 # 本机开发与浏览器 QA 状态
 .claude/
 .gstack/
+
+# Python 虚拟环境
+.venv/
+venv/
+
+# 测试缓存
+.pytest_cache/
+
+# IDE 个人配置
+.vscode/
+
+# Python 打包元数据
+*.egg-info/
+
+# 日志文件
+*.log
