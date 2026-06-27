@@ -1,5 +1,49 @@
 const $ = (selector) => document.querySelector(selector);
 
+const createSpan = (text) => {
+  const el = document.createElement('span');
+  el.style.display = 'block';
+  el.textContent = text;
+  return el;
+};
+
+const BIN_CLASS_MAP = {
+  '#36a673': 'green',
+  '#f0ad35': 'amber',
+  '#d93e47': 'red',
+  '#aa33b4': 'violet',
+};
+
+function renderBins(bins) {
+  const rail = $('#binRail');
+  // 移除旧的分桶卡片，保留合计行
+  rail.querySelectorAll('.bin:not(.total)').forEach((el) => el.remove());
+  bins.forEach((bin) => {
+    const card = document.createElement('article');
+    card.className = `bin ${BIN_CLASS_MAP[bin.color] || ''}`;
+    const label = document.createElement('span');
+    label.textContent = bin.label;
+    const value = document.createElement('strong');
+    value.textContent = bin.count.toLocaleString('zh-CN');
+    card.append(label, value);
+    rail.insertBefore(card, rail.lastElementChild);
+  });
+
+  // 动态渲染图例（保留统计边界标识）
+  const legend = $('#legend');
+  legend.querySelectorAll('span:not(.boundary)').forEach((el) => el.remove());
+  // 标记统计边界为 boundary 类以便保留
+  const boundary = legend.querySelector('span');
+  if (boundary) boundary.classList.add('boundary');
+  bins.slice().reverse().forEach((bin) => {
+    const item = document.createElement('span');
+    const swatch = document.createElement('i');
+    swatch.className = BIN_CLASS_MAP[bin.color] || '';
+    item.append(swatch, bin.label.replace(' μm', ''));
+    legend.insertBefore(item, legend.firstElementChild);
+  });
+}
+
 const imageInput = $('#imageInput');
 const dropZone = $('#dropZone');
 const fileName = $('#fileName');
@@ -203,9 +247,12 @@ analyzeButton.addEventListener('click', async () => {
     previewImage.src = `${data.files.preview}?t=${Date.now()}`;
     showingResult = true;
     regionOverlay.classList.add('hidden');
-    data.counts.forEach((count, index) => $(`#count${index}`).textContent = count.toLocaleString('zh-CN'));
+    renderBins(data.bins);
     $('#countTotal').textContent = data.total.toLocaleString('zh-CN');
-    $('#calibrationReadout').innerHTML = `${data.scale_px} px = ${data.scale_um} μm<br>1 px = ${data.um_per_px} μm`;
+    $('#calibrationReadout').replaceChildren(
+      createSpan(`${data.scale_px} px = ${data.scale_um} μm`),
+      createSpan(`1 px = ${data.um_per_px} μm`),
+    );
     $('#downloadBundle').href = data.files.bundle;
     $('#downloadAnnotated').href = data.files.annotated;
     $('#downloadSummary').href = data.files.summary;

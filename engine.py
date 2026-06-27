@@ -19,6 +19,14 @@ BIN_DEFINITIONS = (
     (200.0, math.inf, "n>200", (180, 51, 170)),
 )
 
+# 前端分桶展示信息 — 与 BIN_DEFINITIONS 一一对应
+BIN_DISPLAY = (
+    {"label": "25–50 μm", "color": "#36a673"},
+    {"label": "50–100 μm", "color": "#f0ad35"},
+    {"label": "100–200 μm", "color": "#d93e47"},
+    {"label": "＞200 μm", "color": "#aa33b4"},
+)
+
 # Yellow scale-gap detection thresholds — tuned for the standard yellow
 # double-stroke printed in the lower-right corner of microscope images.
 _YELLOW_HSV_LOWER = (20, 130, 135)
@@ -33,6 +41,24 @@ _YELLOW_TALL_COL_FRAC = 0.72      # fraction of max column count for "tall"
 _YELLOW_MIN_COLUMN_RUNS = 2       # need at least 2 distinct vertical strokes
 _YELLOW_MIN_GAP_PX = 12
 _YELLOW_MAX_GAP_FRAC = 0.10       # gap relative to image width
+
+# analyze_image 调校参数 — 针对白色滤膜深色颗粒的通用默认值
+_ROI_EXPAND_LEFT = 3
+_ROI_EXPAND_RIGHT = 4
+_MIN_GUARD_PX = 4
+_MIN_EFFECTIVE_RADIUS = 10
+_GAUSSIAN_SIGMA_MIN = 3.0
+_GAUSSIAN_SIGMA_MAX = 18.0
+_GAUSSIAN_SIGMA_NOM = 55.0        # numerator in sigma = nom / um_per_px
+_BKG_GRAY_MAX = 205               # background pixels must be darker than this
+_SEED_GRAY_MAX = 190              # seed pixels must be darker than this
+_MORPH_KERNEL = (3, 3)            # morphology close kernel size (ellipse)
+_CONTOUR_THICKNESS = 5
+_REGION_ELLIPSE_COLOR = (225, 105, 25)   # BGR blue
+_REGION_ELLIPSE_THICKNESS = 9
+_JPEG_QUALITY_ANNOTATED = 94
+_JPEG_QUALITY_PREVIEW = 91
+_PREVIEW_MAX_DIM = 1900.0
 
 
 @dataclass
@@ -157,23 +183,113 @@ def _maximum_feret_diameter(contour: np.ndarray) -> float:
     return math.sqrt(largest_squared) + 1.0
 
 
-def analyze_image(
-    image_path: Path,
-    result_dir: Path,
-    settings: AnalysisSettings,
-) -> dict:
+def _read_and_normalize(image_path: Path) -> np.ndarray:
+    """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。"""
     image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError("图片无法读取，请使用 JPG、PNG、TIFF 或 BMP 文件。")
-
-    # Normalize 16-bit and grayscale images so downstream color operations
-    # (HSV conversion, yellow detection) are safe.
     if image.dtype == np.uint16:
         image = (image / 257).astype(np.uint8)
     if len(image.shape) == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     elif image.shape[2] == 1:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    return image
+
+
+def _make_ellipse_mask(
+    shape: tuple[int, int],
+    center: tuple[int, int],
+    axes: tuple[int, int],
+) -> np.ndarray:
+    """创建二值椭圆蒙版，椭圆内为 1。"""
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 1, cv2.FILLED)
+    return mask
+
+
+def _write_result_files(
+    result_dir: Path,
+    annotated: np.ndarray,
+    records: list[dict],
+    counts: list[int],
+    result: dict,
+    scale_px: float,
+    width: int,
+    height: int,
+    settings: AnalysisSettings,
+) -> None:
+    """将所有分析结果写入磁盘（图片、CSV、JSON、ZIP）。"""
+    annotated_path = result_dir / "annotated.jpg"
+    preview_path = result_dir / "preview.jpg"
+    summary_path = result_dir / "summary.csv"
+    measurements_path = result_dir / "measurements.csv"
+    metadata_path = result_dir / "analysis.json"
+    bundle_path = result_dir / "result_bundle.zip"
+
+    try:
+        cv2.imwrite(str(annotated_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_ANNOTATED])
+        preview_scale = min(1.0, _PREVIEW_MAX_DIM / max(width, height))
+        preview = cv2.resize(
+            annotated,
+            (0, 0),
+            fx=preview_scale,
+            fy=preview_scale,
+            interpolation=cv2.INTER_AREA,
+        )
+        cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_PREVIEW])
+    except Exception as exc:
+        raise OSError(f"写入标注图片失败，请检查磁盘空间和目录权限：{exc}") from exc
+
+    try:
+        with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.writer(file)
+            writer.writerow(["颗粒规格_um（最大长度）", "数量"])
+            for count, (_, _, label, _) in zip(counts, BIN_DEFINITIONS):
+                writer.writerow([label, count])
+            writer.writerow(["合计", sum(counts)])
+            writer.writerow([])
+            writer.writerow(["比例换算", f"{scale_px:.2f} px = {settings.scale_um:g} um"])
+            writer.writerow(["识别参数", f"边缘={settings.edge_threshold}; 深色核心={settings.seed_threshold}"])
+
+        with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=["编号", "center_x_px", "center_y_px", "length_px", "length_um", "pixel_area", "bin"],
+            )
+            writer.writeheader()
+            for index, record in enumerate(
+                sorted(records, key=lambda item: (item["center_y_px"], item["center_x_px"])), 1
+            ):
+                writer.writerow({"编号": index, **record})
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"写入 CSV 结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
+
+    try:
+        metadata_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"写入分析元数据失败，请检查磁盘空间和目录权限：{exc}") from exc
+
+    try:
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in (annotated_path, preview_path, summary_path, measurements_path, metadata_path):
+                archive.write(path, arcname=path.name)
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"打包结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
+
+
+def analyze_image(
+    image_path: Path,
+    result_dir: Path,
+    settings: AnalysisSettings,
+) -> dict:
+    image = _read_and_normalize(image_path)
 
     result_dir.mkdir(parents=True, exist_ok=True)
     height, width = image.shape[:2]
@@ -190,47 +306,41 @@ def analyze_image(
     cy = int(round(settings.center_y * height))
     rx = int(round(settings.radius_x * width))
     ry = int(round(settings.radius_y * height))
-    guard_px = max(4, int(round(settings.guard_um / um_per_px)))
-    effective_rx = max(10, rx - guard_px)
-    effective_ry = max(10, ry - guard_px)
+    guard_px = max(_MIN_GUARD_PX, int(round(settings.guard_um / um_per_px)))
+    effective_rx = max(_MIN_EFFECTIVE_RADIUS, rx - guard_px)
+    effective_ry = max(_MIN_EFFECTIVE_RADIUS, ry - guard_px)
 
-    x0 = max(0, cx - effective_rx - 3)
-    y0 = max(0, cy - effective_ry - 3)
-    x1 = min(width, cx + effective_rx + 4)
-    y1 = min(height, cy + effective_ry + 4)
+    x0 = max(0, cx - effective_rx - _ROI_EXPAND_LEFT)
+    y0 = max(0, cy - effective_ry - _ROI_EXPAND_LEFT)
+    x1 = min(width, cx + effective_rx + _ROI_EXPAND_RIGHT)
+    y1 = min(height, cy + effective_ry + _ROI_EXPAND_RIGHT)
 
     gray_full = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = gray_full[y0:y1, x0:x1]
-    region = np.zeros(gray.shape, dtype=np.uint8)
-    cv2.ellipse(
-        region,
+    region = _make_ellipse_mask(
+        gray.shape,
         (cx - x0, cy - y0),
         (effective_rx, effective_ry),
-        0,
-        0,
-        360,
-        1,
-        cv2.FILLED,
     )
 
-    sigma_px = float(np.clip(55.0 / um_per_px, 3.0, 18.0))
+    sigma_px = float(np.clip(_GAUSSIAN_SIGMA_NOM / um_per_px, _GAUSSIAN_SIGMA_MIN, _GAUSSIAN_SIGMA_MAX))
     background = cv2.GaussianBlur(gray, (0, 0), sigma_px)
     contrast = cv2.subtract(background, gray)
 
     low = (
         (contrast >= settings.edge_threshold)
         & (region > 0)
-        & (gray <= 205)
+        & (gray <= _BKG_GRAY_MAX)
     ).astype(np.uint8)
     seed = (
         (contrast >= settings.seed_threshold)
         & (region > 0)
-        & (gray <= 190)
+        & (gray <= _SEED_GRAY_MAX)
     )
     low = cv2.morphologyEx(
         low,
         cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, _MORPH_KERNEL),
     )
 
     _, labels, stats, centroids = cv2.connectedComponentsWithStats(low, connectivity=8)
@@ -238,9 +348,8 @@ def analyze_image(
     selected_labels = selected_labels[selected_labels != 0]
 
     records = []
-    counts = [0, 0, 0, 0]
+    counts = [0] * len(BIN_DEFINITIONS)
     annotated = image.copy()
-    contour_shift = np.array([[[x0, y0]]], dtype=np.int32)
 
     for label_id in selected_labels:
         x, y, component_width, component_height, pixel_area = stats[label_id]
@@ -262,7 +371,7 @@ def analyze_image(
             [[[x + x0, y + y0]]], dtype=np.int32
         )
         color_bgr = BIN_DEFINITIONS[bin_index][3]
-        cv2.drawContours(annotated, [contour_full], -1, color_bgr, 5, cv2.LINE_AA)
+        cv2.drawContours(annotated, [contour_full], -1, color_bgr, _CONTOUR_THICKNESS, cv2.LINE_AA)
         records.append(
             {
                 "center_x_px": int(round(centroids[label_id][0])) + x0,
@@ -281,59 +390,18 @@ def analyze_image(
         0,
         0,
         360,
-        (225, 105, 25),
-        9,
+        _REGION_ELLIPSE_COLOR,
+        _REGION_ELLIPSE_THICKNESS,
         cv2.LINE_AA,
     )
-
-    annotated_path = result_dir / "annotated.jpg"
-    preview_path = result_dir / "preview.jpg"
-    summary_path = result_dir / "summary.csv"
-    measurements_path = result_dir / "measurements.csv"
-    metadata_path = result_dir / "analysis.json"
-    bundle_path = result_dir / "result_bundle.zip"
-
-    try:
-        cv2.imwrite(str(annotated_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 94])
-        preview_scale = min(1.0, 1900.0 / max(width, height))
-        preview = cv2.resize(
-            annotated,
-            (0, 0),
-            fx=preview_scale,
-            fy=preview_scale,
-            interpolation=cv2.INTER_AREA,
-        )
-        cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, 91])
-    except Exception as exc:
-        raise OSError(f"写入标注图片失败，请检查磁盘空间和目录权限：{exc}") from exc
-
-    try:
-        with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
-            writer = csv.writer(file)
-            writer.writerow(["颗粒规格_um（最大长度）", "数量"])
-            for count, (_, _, label, _) in zip(counts, BIN_DEFINITIONS):
-                writer.writerow([label, count])
-            writer.writerow(["合计", sum(counts)])
-            writer.writerow([])
-            writer.writerow(["比例换算", f"{scale_px:.2f} px = {settings.scale_um:g} um"])
-            writer.writerow(["识别参数", f"边缘={settings.edge_threshold}; 深色核心={settings.seed_threshold}"])
-
-        with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
-            writer = csv.DictWriter(
-                file,
-                fieldnames=["编号", "center_x_px", "center_y_px", "length_px", "length_um", "pixel_area", "bin"],
-            )
-            writer.writeheader()
-            for index, record in enumerate(sorted(records, key=lambda item: (item["center_y_px"], item["center_x_px"])), 1):
-                writer.writerow({"编号": index, **record})
-    except OSError:
-        raise
-    except Exception as exc:
-        raise OSError(f"写入 CSV 结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
 
     result = {
         "image": {"width": width, "height": height, "name": image_path.name},
         "counts": counts,
+        "bins": [
+            {**display, "count": count}
+            for display, count in zip(BIN_DISPLAY, counts)
+        ],
         "total": sum(counts),
         "scale_px": round(scale_px, 2),
         "scale_um": settings.scale_um,
@@ -347,20 +415,5 @@ def analyze_image(
         },
         "settings": asdict(settings),
     }
-    try:
-        metadata_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        raise
-    except Exception as exc:
-        raise OSError(f"写入分析元数据失败，请检查磁盘空间和目录权限：{exc}") from exc
-
-    try:
-        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            for path in (annotated_path, preview_path, summary_path, measurements_path, metadata_path):
-                archive.write(path, arcname=path.name)
-    except OSError:
-        raise
-    except Exception as exc:
-        raise OSError(f"打包结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
-
+    _write_result_files(result_dir, annotated, records, counts, result, scale_px, width, height, settings)
     return result

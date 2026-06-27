@@ -117,6 +117,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Sec-Fetch-Site") == "cross-site":
             self.send_json({"error": "不允许的外部请求"}, status=403)
             return
+        image_path = None
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_UPLOAD_BYTES:
@@ -189,6 +190,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(error)}, status=400)
         except Exception as error:
             self.send_json({"error": f"分析失败：{error}"}, status=500)
+        finally:
+            if image_path is not None:
+                try:
+                    image_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def open_browser(port: int) -> None:
