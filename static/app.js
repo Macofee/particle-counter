@@ -55,6 +55,8 @@ const regionOverlay = $('#regionOverlay');
 const processing = $('#processing');
 const results = $('#results');
 const errorMessage = $('#errorMessage');
+const stage = $('#stage');
+const zoomToolbar = $('#zoomToolbar');
 
 let selectedFile = null;
 let sourceUrl = null;
@@ -62,6 +64,67 @@ let showingResult = false;
 let currentResult = null;
 let reviewMode = null;
 let splitDraft = null;
+let zoomPercent = 100;
+let resetZoomOnNextImage = true;
+
+const ZOOM_MIN = 25;
+const ZOOM_MAX = 400;
+const ZOOM_STEP = 25;
+
+function fitImageSize() {
+  if (!previewImage.naturalWidth || !previewImage.naturalHeight) return null;
+  const availableWidth = Math.max(1, stage.clientWidth);
+  const availableHeight = Math.max(1, Math.min(window.innerHeight * 0.78, stage.clientHeight || Infinity));
+  const scale = Math.min(
+    1,
+    availableWidth / previewImage.naturalWidth,
+    availableHeight / previewImage.naturalHeight,
+  );
+  return {
+    width: previewImage.naturalWidth * scale,
+    height: previewImage.naturalHeight * scale,
+  };
+}
+
+function applyZoom(preserveViewport = true) {
+  const fit = fitImageSize();
+  if (!fit) return;
+  const centerX = stage.scrollWidth ? (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth : 0.5;
+  const centerY = stage.scrollHeight ? (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight : 0.5;
+  imageFrame.style.width = `${fit.width * zoomPercent / 100}px`;
+  imageFrame.style.height = `${fit.height * zoomPercent / 100}px`;
+  $('#zoomReset').textContent = `${zoomPercent}%`;
+  $('#zoomOut').disabled = zoomPercent <= ZOOM_MIN;
+  $('#zoomIn').disabled = zoomPercent >= ZOOM_MAX;
+  if (preserveViewport) requestAnimationFrame(() => {
+    stage.scrollLeft = Math.max(0, centerX * stage.scrollWidth - stage.clientWidth / 2);
+    stage.scrollTop = Math.max(0, centerY * stage.scrollHeight - stage.clientHeight / 2);
+  });
+}
+
+function setZoom(value, preserveViewport = true) {
+  zoomPercent = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value / ZOOM_STEP) * ZOOM_STEP));
+  applyZoom(preserveViewport);
+}
+
+function resetZoom() {
+  zoomPercent = 100;
+  applyZoom(false);
+  requestAnimationFrame(() => {
+    stage.scrollLeft = Math.max(0, (stage.scrollWidth - stage.clientWidth) / 2);
+    stage.scrollTop = Math.max(0, (stage.scrollHeight - stage.clientHeight) / 2);
+  });
+}
+
+$('#zoomOut').addEventListener('click', () => setZoom(zoomPercent - ZOOM_STEP));
+$('#zoomIn').addEventListener('click', () => setZoom(zoomPercent + ZOOM_STEP));
+$('#zoomReset').addEventListener('click', resetZoom);
+stage.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  setZoom(zoomPercent + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+}, { passive: false });
+window.addEventListener('resize', () => applyZoom(false));
 
 const parameterIds = [
   'scaleUm', 'scalePx', 'centerX', 'centerY', 'radiusX', 'radiusY',
@@ -120,8 +183,9 @@ function showReviewMessage(message, isError = false) {
   element.classList.toggle('error', isError);
 }
 
-function renderResult(data) {
+function renderResult(data, preserveZoom = false) {
   currentResult = data;
+  resetZoomOnNextImage = !preserveZoom;
   previewImage.src = `${data.files.preview}?t=${Date.now()}`;
   showingResult = true;
   regionOverlay.classList.add('hidden');
@@ -158,7 +222,7 @@ async function submitReview(action) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '人工复核失败。');
-    renderResult(data);
+    renderResult(data, true);
   } catch (error) {
     showReviewMessage(error.message, true);
   } finally {
@@ -320,6 +384,7 @@ function setFile(file) {
   selectedFile = file;
   if (sourceUrl) URL.revokeObjectURL(sourceUrl);
   sourceUrl = URL.createObjectURL(file);
+  resetZoomOnNextImage = true;
   previewImage.src = sourceUrl;
   fileName.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
   emptyState.classList.add('hidden');
@@ -328,6 +393,7 @@ function setFile(file) {
   results.classList.add('hidden');
   showingResult = false;
   analyzeButton.disabled = false;
+  zoomToolbar.classList.remove('hidden');
   errorMessage.textContent = '';
   updateRegion();
 }
@@ -384,7 +450,12 @@ analyzeButton.addEventListener('click', async () => {
   }
 });
 
-previewImage.addEventListener('load', updateRegion);
+previewImage.addEventListener('load', () => {
+  updateRegion();
+  if (resetZoomOnNextImage) resetZoom();
+  else applyZoom(false);
+  resetZoomOnNextImage = false;
+});
 $('#inspectionDate').value = new Date().toISOString().slice(0, 10);
 $('#operatorName').addEventListener('input', () => { $('#reviewActor').value = $('#operatorName').value; });
 renderTemplates();
