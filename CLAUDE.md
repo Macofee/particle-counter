@@ -1,6 +1,6 @@
 # Particle Counter — Local Particle Counting Workstation
 
-Python Flask app for particle image analysis and counting.
+Python standard-library HTTP service with an OpenCV analysis engine and browser UI.
 
 ## Skill routing
 

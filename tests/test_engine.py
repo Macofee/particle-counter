@@ -1,13 +1,16 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
 from engine import (
     _bin_index,
+    _checked_imwrite,
     _maximum_feret_diameter,
+    _read_and_normalize,
     _runs,
     analyze_image,
     detect_yellow_scale_gap,
@@ -215,6 +218,38 @@ class AnalyzeImageIntegrationTests(unittest.TestCase):
             self.assertIn("total", result)
             # 至少一个文件被写出
             self.assertTrue((result_dir / "analysis.json").is_file())
+
+
+class ImageIoReliabilityTests(unittest.TestCase):
+    def test_16_bit_grayscale_is_preserved_then_normalized_to_bgr(self):
+        source = np.array([[0, 257, 65535]], dtype=np.uint16)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sixteen_bit.png"
+            self.assertTrue(cv2.imwrite(str(path), source))
+
+            normalized = _read_and_normalize(path)
+
+        self.assertEqual(normalized.dtype, np.uint8)
+        self.assertEqual(normalized.shape, (1, 3, 3))
+        self.assertEqual(normalized[0, 0].tolist(), [0, 0, 0])
+        self.assertEqual(normalized[0, 1].tolist(), [1, 1, 1])
+        self.assertEqual(normalized[0, 2].tolist(), [255, 255, 255])
+
+    def test_bgra_image_is_normalized_to_bgr(self):
+        source = np.array([[[10, 20, 30, 40]]], dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "alpha.png"
+            self.assertTrue(cv2.imwrite(str(path), source))
+
+            normalized = _read_and_normalize(path)
+
+        self.assertEqual(normalized.shape, (1, 1, 3))
+        self.assertEqual(normalized[0, 0].tolist(), [10, 20, 30])
+
+    def test_false_imwrite_result_raises_os_error(self):
+        with patch("engine.cv2.imwrite", return_value=False):
+            with self.assertRaisesRegex(OSError, "未能写入"):
+                _checked_imwrite(Path("preview.jpg"), np.zeros((1, 1, 3), dtype=np.uint8), [])
 
 
 if __name__ == "__main__":

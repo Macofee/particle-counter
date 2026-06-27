@@ -27,6 +27,8 @@ BIN_DISPLAY = (
     {"label": "＞200 μm", "color": "#aa33b4"},
 )
 
+ALGORITHM_VERSION = "2.0.0"
+
 # Yellow scale-gap detection thresholds — tuned for the standard yellow
 # double-stroke printed in the lower-right corner of microscope images.
 _YELLOW_HSV_LOWER = (20, 130, 135)
@@ -185,16 +187,28 @@ def _maximum_feret_diameter(contour: np.ndarray) -> float:
 
 def _read_and_normalize(image_path: Path) -> np.ndarray:
     """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。"""
-    image = cv2.imread(str(image_path))
+    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError("图片无法读取，请使用 JPG、PNG、TIFF 或 BMP 文件。")
     if image.dtype == np.uint16:
         image = (image / 257).astype(np.uint8)
+    elif image.dtype != np.uint8:
+        raise ValueError(f"不支持的图片位深：{image.dtype}，请使用 8-bit 或 16-bit 图片。")
     if len(image.shape) == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     elif image.shape[2] == 1:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.shape[2] == 4:
+        image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    elif image.shape[2] != 3:
+        raise ValueError(f"不支持的图片通道数：{image.shape[2]}。")
     return image
+
+
+def _checked_imwrite(path: Path, image: np.ndarray, params: list[int]) -> None:
+    """Write an image and turn OpenCV's False return into a visible failure."""
+    if not cv2.imwrite(str(path), image, params):
+        raise OSError(f"OpenCV 未能写入图片：{path.name}")
 
 
 def _make_ellipse_mask(
@@ -228,7 +242,11 @@ def _write_result_files(
     bundle_path = result_dir / "result_bundle.zip"
 
     try:
-        cv2.imwrite(str(annotated_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_ANNOTATED])
+        _checked_imwrite(
+            annotated_path,
+            annotated,
+            [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_ANNOTATED],
+        )
         preview_scale = min(1.0, _PREVIEW_MAX_DIM / max(width, height))
         preview = cv2.resize(
             annotated,
@@ -237,7 +255,13 @@ def _write_result_files(
             fy=preview_scale,
             interpolation=cv2.INTER_AREA,
         )
-        cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_PREVIEW])
+        _checked_imwrite(
+            preview_path,
+            preview,
+            [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY_PREVIEW],
+        )
+    except OSError:
+        raise
     except Exception as exc:
         raise OSError(f"写入标注图片失败，请检查磁盘空间和目录权限：{exc}") from exc
 
@@ -396,6 +420,7 @@ def analyze_image(
     )
 
     result = {
+        "algorithm_version": ALGORITHM_VERSION,
         "image": {"width": width, "height": height, "name": image_path.name},
         "counts": counts,
         "bins": [
