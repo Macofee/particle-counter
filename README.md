@@ -31,6 +31,16 @@ python3 app.py
 
 所有图片和结果只保存在本机 `data` 目录内，不会上传到网络。
 
+## 计量验证
+
+使用人工确认的黄金数据集检查精确率、召回率、分档正确率、计数偏差、比例尺误差与重复性：
+
+```bash
+python3 validation.py validation/manifest.json --output validation-report.json
+```
+
+清单格式和建集方法见 `validation/README.md`。验收门槛由项目检测人员确定。
+
 ## 开发记录
 
 ### 2026-06-27 — 代码审查与修复

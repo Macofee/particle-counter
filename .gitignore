@@ -4,6 +4,8 @@ __pycache__/
 
 # 本地检测图片与生成结果
 data/
+validation/images/
+validation-report.json
 
 # 本机开发与浏览器 QA 状态
 .claude/

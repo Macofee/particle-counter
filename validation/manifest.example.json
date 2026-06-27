@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "acceptance": {
+    "min_precision": 0.95,
+    "min_recall": 0.95,
+    "min_bin_accuracy": 0.98,
+    "max_abs_count_error_per_bin": 1,
+    "max_scale_error_px": 1.0,
+    "require_repeatability": true
+  },
+  "cases": [
+    {
+      "id": "sample-001",
+      "image": "images/sample-001.png",
+      "settings": {
+        "scale_um": 500,
+        "scale_px": null,
+        "center_x": 0.49,
+        "center_y": 0.49,
+        "radius_x": 0.47,
+        "radius_y": 0.46
+      },
+      "tolerances": {
+        "position_px": 8
+      },
+      "expected": {
+        "scale_px": 91,
+        "counts": [1, 0, 0, 0],
+        "particles": [
+          {
+            "center_x_px": 400,
+            "center_y_px": 330,
+            "length_um": 42.5,
+            "bin": "25<n<=50"
+          }
+        ]
+      }
+    }
+  ]
+}
