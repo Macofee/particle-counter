@@ -86,9 +86,14 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
         f"1 px = {result['um_per_px']} μm"
     )
     draw.text((90, 1370), calibration, font=body_font, fill=navy)
+    audit = result.get("review_audit", [])
+    active_corrections = sum(
+        item.get("type") in {"add", "remove"} and not item.get("undone")
+        for item in audit
+    )
     draw.text(
         (90, 1410),
-        f"算法版本：{result.get('algorithm_version', '未知')}　人工修正：{len(result.get('review_audit', []))} 项",
+        f"算法版本：{result.get('algorithm_version', '未知')}　复核操作：{len(audit)} 项　当前修正：{active_corrections} 项",
         font=body_font,
         fill=navy,
     )

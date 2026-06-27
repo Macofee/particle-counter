@@ -12,7 +12,6 @@ python3 -m PyInstaller \
   --windowed \
   --name "颗粒度计数台" \
   --add-data "static:static" \
-  --hidden-import "PIL._tkinter_finder" \
   app.py
 
 echo "构建完成：$APP_PATH"
