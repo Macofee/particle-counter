@@ -128,6 +128,8 @@ function renderResult(data) {
   $('#downloadAnnotated').href = data.files.annotated;
   $('#downloadSummary').href = data.files.summary;
   $('#downloadMeasurements').href = data.files.measurements;
+  $('#downloadReport').href = data.files.report;
+  $('#downloadOriginal').href = data.files.original;
   const activeActions = (data.review_audit || []).filter((item) => !item.undone).length;
   showReviewMessage(activeActions ? `已记录 ${activeActions} 项人工修正。` : '选择操作后，在标注图中点击目标位置。');
   results.classList.remove('hidden');
@@ -328,6 +330,11 @@ analyzeButton.addEventListener('click', async () => {
   appendField(form, 'edge_threshold', '#edgeThreshold');
   appendField(form, 'seed_threshold', '#seedThreshold');
   appendField(form, 'guard_um', '#guardUm');
+  appendField(form, 'sample_id', '#sampleId');
+  appendField(form, 'batch_id', '#batchId');
+  appendField(form, 'operator', '#operatorName');
+  appendField(form, 'inspection_date', '#inspectionDate');
+  appendField(form, 'notes', '#reportNotes');
 
   try {
     const response = await fetch('/api/analyze', { method: 'POST', body: form });
@@ -345,5 +352,7 @@ analyzeButton.addEventListener('click', async () => {
 });
 
 previewImage.addEventListener('load', updateRegion);
+$('#inspectionDate').value = new Date().toISOString().slice(0, 10);
+$('#operatorName').addEventListener('input', () => { $('#reviewActor').value = $('#operatorName').value; });
 renderTemplates();
 updateRegion();

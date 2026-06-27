@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -189,6 +190,11 @@ class AnalyzeImageIntegrationTests(unittest.TestCase):
             self.assertTrue((result_dir / "measurements.csv").is_file())
             self.assertTrue((result_dir / "analysis.json").is_file())
             self.assertTrue((result_dir / "result_bundle.zip").is_file())
+            self.assertTrue((result_dir / "report.pdf").read_bytes().startswith(b"%PDF"))
+            self.assertTrue((result_dir / result["source"]["file"]).is_file())
+            with zipfile.ZipFile(result_dir / "result_bundle.zip") as archive:
+                self.assertIn("report.pdf", archive.namelist())
+                self.assertIn(result["source"]["file"], archive.namelist())
 
     def test_grayscale_image_is_normalized(self):
         """验证灰度图输入能被正确归一化为三通道 BGR，不崩溃。"""

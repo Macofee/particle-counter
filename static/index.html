@@ -33,6 +33,20 @@
 
       <section class="panel-section">
         <div class="section-heading">
+          <span class="step">样品</span>
+          <h2>检测记录</h2>
+        </div>
+        <div class="field-grid two">
+          <label>样品编号<input id="sampleId" type="text" maxlength="80" placeholder="必填或按内部规则"></label>
+          <label>批次编号<input id="batchId" type="text" maxlength="80" placeholder="选填"></label>
+          <label>检测人员<input id="operatorName" type="text" maxlength="80" placeholder="姓名或工号"></label>
+          <label>检测日期<input id="inspectionDate" type="date"></label>
+        </div>
+        <label class="full-text-field">报告备注<textarea id="reportNotes" maxlength="500" rows="2" placeholder="样品状态、异常情况或复核说明"></textarea></label>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading">
           <span class="step">模板</span>
           <h2>相机与滤膜参数</h2>
         </div>
@@ -144,6 +158,8 @@
           <a id="downloadAnnotated">标注原图</a>
           <a id="downloadSummary">汇总 CSV</a>
           <a id="downloadMeasurements">颗粒明细</a>
+          <a id="downloadReport">PDF 报告</a>
+          <a id="downloadOriginal">原始图片</a>
         </div>
         <div class="legend" id="legend">
           <span><i class="blue"></i>统计边界</span>

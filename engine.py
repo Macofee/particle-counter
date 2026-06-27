@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
+import shutil
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -10,6 +12,8 @@ from typing import Optional
 
 import cv2
 import numpy as np
+
+from reporting import write_pdf_report
 
 
 BIN_DEFINITIONS = (
@@ -240,6 +244,7 @@ def _write_result_files(
     measurements_path = result_dir / "measurements.csv"
     metadata_path = result_dir / "analysis.json"
     bundle_path = result_dir / "result_bundle.zip"
+    report_path = result_dir / "report.pdf"
 
     try:
         _checked_imwrite(
@@ -321,8 +326,24 @@ def _write_result_files(
         raise OSError(f"写入分析元数据失败，请检查磁盘空间和目录权限：{exc}") from exc
 
     try:
+        write_pdf_report(report_path, result, annotated)
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"生成 PDF 报告失败：{exc}") from exc
+
+    try:
         with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            for path in (annotated_path, preview_path, summary_path, measurements_path, metadata_path):
+            source_path = result_dir / result["source"]["file"]
+            for path in (
+                source_path,
+                annotated_path,
+                preview_path,
+                summary_path,
+                measurements_path,
+                metadata_path,
+                report_path,
+            ):
                 archive.write(path, arcname=path.name)
     except OSError:
         raise
@@ -334,6 +355,7 @@ def analyze_image(
     image_path: Path,
     result_dir: Path,
     settings: AnalysisSettings,
+    sample_metadata: Optional[dict] = None,
 ) -> dict:
     image = _read_and_normalize(image_path)
 
@@ -466,7 +488,13 @@ def analyze_image(
         "settings": asdict(settings),
         "particles": records,
         "review_audit": [],
+        "sample": sample_metadata or {},
+        "source": {
+            "file": f"original{image_path.suffix.lower() or '.img'}",
+            "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+        },
     }
+    shutil.copyfile(image_path, result_dir / result["source"]["file"])
     _checked_imwrite(
         result_dir / "source.png",
         image,

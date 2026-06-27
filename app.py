@@ -32,14 +32,18 @@ MAX_REVIEW_BYTES = 64 * 1024
 JOB_LOCKS: dict[str, threading.Lock] = {}
 
 
-def result_files(job_id: str) -> dict[str, str]:
-    return {
+def result_files(job_id: str, result: dict = None) -> dict[str, str]:
+    files = {
         "preview": f"/files/{job_id}/preview.jpg",
         "annotated": f"/files/{job_id}/annotated.jpg",
         "summary": f"/files/{job_id}/summary.csv",
         "measurements": f"/files/{job_id}/measurements.csv",
+        "report": f"/files/{job_id}/report.pdf",
         "bundle": f"/files/{job_id}/result_bundle.zip",
     }
+    if result and result.get("source", {}).get("file"):
+        files["original"] = f"/files/{job_id}/{result['source']['file']}"
+    return files
 
 
 def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dict]:
@@ -192,9 +196,19 @@ class Handler(BaseHTTPRequestHandler):
             if not (0 <= settings.guard_um < 100000):
                 raise ValueError("圆边内缩值不合理。")
 
-            result = analyze_image(image_path, RESULTS / job_id, settings)
+            def text_field(name: str, limit: int) -> str:
+                return fields.get(name, "").strip()[:limit]
+
+            sample_metadata = {
+                "sample_id": text_field("sample_id", 80),
+                "batch_id": text_field("batch_id", 80),
+                "operator": text_field("operator", 80),
+                "inspection_date": text_field("inspection_date", 20),
+                "notes": text_field("notes", 500),
+            }
+            result = analyze_image(image_path, RESULTS / job_id, settings, sample_metadata)
             result["job_id"] = job_id
-            result["files"] = result_files(job_id)
+            result["files"] = result_files(job_id, result)
             self.send_json(result)
         except ValueError as error:
             self.send_json({"error": str(error)}, status=400)
@@ -226,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 result = apply_review_action(result_dir, action, str(payload.get("actor", "操作员")))
             result["job_id"] = job_id
-            result["files"] = result_files(job_id)
+            result["files"] = result_files(job_id, result)
             self.send_json(result)
         except (ValueError, json.JSONDecodeError) as error:
             self.send_json({"error": str(error)}, status=400)
