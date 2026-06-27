@@ -6,6 +6,9 @@ __pycache__/
 data/
 validation/images/
 validation-report.json
+build/
+dist/
+*.spec
 
 # 本机开发与浏览器 QA 状态
 .claude/

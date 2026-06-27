@@ -45,6 +45,26 @@ python3 validation.py validation/manifest.json --output validation-report.json
 
 清单格式和建集方法见 `validation/README.md`。验收门槛由项目检测人员确定。
 
+## 批量处理
+
+同一套参数批量处理一个文件夹，输出逐图结果、汇总 CSV 和批次 ZIP：
+
+```bash
+python3 batch.py 原图文件夹 新的空输出文件夹 \
+  --settings 参数.json --batch-id B-001 --operator 张三
+```
+
+为保护已有数据，输出文件夹非空时程序会停止，不会覆盖或删除文件。
+
+## 构建 macOS 应用
+
+```bash
+python3 -m pip install -r requirements-build.txt
+./packaging/build_macos_app.command
+```
+
+产物位于 `dist/颗粒度计数台.app`，以无终端窗口模式运行。应用数据保存在 `~/Library/Application Support/ParticleCounter`。构建脚本不会覆盖已有 `.app`。
+
 ## 开发记录
 
 ### 2026-06-27 — 代码审查与修复

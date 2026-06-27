@@ -5,6 +5,7 @@ import math
 import mimetypes
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -21,9 +22,14 @@ from review import apply_review_action
 
 
 ROOT = Path(__file__).resolve().parent
-STATIC = ROOT / "static"
-UPLOADS = ROOT / "data" / "uploads"
-RESULTS = ROOT / "data" / "results"
+STATIC = Path(getattr(sys, "_MEIPASS", ROOT)) / "static"
+DATA_ROOT = (
+    Path.home() / "Library" / "Application Support" / "ParticleCounter"
+    if getattr(sys, "frozen", False)
+    else ROOT / "data"
+)
+UPLOADS = DATA_ROOT / "uploads"
+RESULTS = DATA_ROOT / "results"
 UPLOADS.mkdir(parents=True, exist_ok=True)
 RESULTS.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 350 * 1024 * 1024
