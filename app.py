@@ -113,6 +113,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/api/analyze":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
+        # 轻量 CSRF 防护：拒绝跨站 POST 请求
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            self.send_json({"error": "不允许的外部请求"}, status=403)
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_UPLOAD_BYTES:

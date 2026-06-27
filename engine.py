@@ -116,7 +116,7 @@ def _bin_index(length_um: float) -> int:
     for index, (low, high, _, _) in enumerate(BIN_DEFINITIONS):
         if low < length_um <= high:
             return index
-    return len(BIN_DEFINITIONS) - 1
+    raise ValueError(f"颗粒尺寸 {length_um:.2f} μm 不在任何分桶范围，请检查 min_size_um 设置。")
 
 
 def _maximum_feret_diameter(contour: np.ndarray) -> float:
