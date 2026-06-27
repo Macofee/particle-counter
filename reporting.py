@@ -88,7 +88,7 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
     draw.text((90, 1370), calibration, font=body_font, fill=navy)
     audit = result.get("review_audit", [])
     active_corrections = sum(
-        item.get("type") in {"add", "remove"} and not item.get("undone")
+        item.get("type") in {"add", "remove", "split"} and not item.get("undone")
         for item in audit
     )
     draw.text(

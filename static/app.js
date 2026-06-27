@@ -61,6 +61,7 @@ let sourceUrl = null;
 let showingResult = false;
 let currentResult = null;
 let reviewMode = null;
+let splitDraft = null;
 
 const parameterIds = [
   'scaleUm', 'scalePx', 'centerX', 'centerY', 'radiusX', 'radiusY',
@@ -100,11 +101,17 @@ function markParametersDirty() {
 
 function setReviewMode(mode) {
   reviewMode = mode;
+  if (mode !== 'split') splitDraft = null;
   $('#removeParticle').classList.toggle('active', mode === 'remove');
   $('#addParticle').classList.toggle('active', mode === 'add');
+  $('#splitParticle').classList.toggle('active', mode === 'split');
   imageFrame.classList.toggle('reviewing', Boolean(mode));
   if (mode === 'remove') showReviewMessage('请在标注图中点击要删除的颗粒。');
   if (mode === 'add') showReviewMessage('请在标注图中点击漏检颗粒的中心。');
+  if (mode === 'split') {
+    splitDraft = {};
+    showReviewMessage('拆分第 1/3 步：点击要拆分的粘连颗粒。');
+  }
 }
 
 function showReviewMessage(message, isError = false) {
@@ -161,6 +168,7 @@ async function submitReview(action) {
 
 $('#removeParticle').addEventListener('click', () => setReviewMode(reviewMode === 'remove' ? null : 'remove'));
 $('#addParticle').addEventListener('click', () => setReviewMode(reviewMode === 'add' ? null : 'add'));
+$('#splitParticle').addEventListener('click', () => setReviewMode(reviewMode === 'split' ? null : 'split'));
 $('#undoReview').addEventListener('click', () => submitReview({ type: 'undo' }));
 
 previewImage.addEventListener('click', (event) => {
@@ -179,6 +187,31 @@ previewImage.addEventListener('click', (event) => {
       distance: Math.hypot(particle.center_x_px - x, particle.center_y_px - y),
     }))
     .sort((left, right) => left.distance - right.distance)[0];
+  if (reviewMode === 'split') {
+    if (!splitDraft.particle_id) {
+      if (!nearest || nearest.distance > threshold) {
+        showReviewMessage('点击位置附近没有颗粒，请靠近彩色轮廓重试。', true);
+        return;
+      }
+      splitDraft.particle_id = nearest.particle.id;
+      showReviewMessage('拆分第 2/3 步：点击第一颗新颗粒的中心。');
+      return;
+    }
+    if (!splitDraft.first) {
+      splitDraft.first = { x_px: x, y_px: y, length_um: Number($('#splitLengthA').value) };
+      showReviewMessage('拆分第 3/3 步：点击第二颗新颗粒的中心。');
+      return;
+    }
+    submitReview({
+      type: 'split',
+      particle_id: splitDraft.particle_id,
+      particles: [
+        splitDraft.first,
+        { x_px: x, y_px: y, length_um: Number($('#splitLengthB').value) },
+      ],
+    });
+    return;
+  }
   if (!nearest || nearest.distance > threshold) {
     showReviewMessage('点击位置附近没有颗粒，请靠近彩色轮廓重试。', true);
     return;

@@ -74,6 +74,30 @@ class ReviewWorkflowTests(unittest.TestCase):
                     {"type": "add", "x_px": 1, "y_px": 1, "length_um": 75},
                 )
 
+    def test_split_and_undo_replaces_one_particle_with_two(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_dir, original = self._analyzed_result(Path(tmpdir))
+            particle_id = original["particles"][0]["id"]
+
+            split = apply_review_action(
+                result_dir,
+                {
+                    "type": "split",
+                    "particle_id": particle_id,
+                    "particles": [
+                        {"x_px": 190, "y_px": 200, "length_um": 55},
+                        {"x_px": 210, "y_px": 200, "length_um": 65},
+                    ],
+                },
+                "tester",
+            )
+            restored = apply_review_action(result_dir, {"type": "undo"}, "tester")
+
+            self.assertEqual(split["total"], original["total"] + 1)
+            self.assertEqual(len(split["review_audit"][-1]["replacements"]), 2)
+            self.assertEqual(restored["total"], original["total"])
+            self.assertTrue(any(item["id"] == particle_id for item in restored["particles"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -136,6 +136,29 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
         if index is None:
             raise ValueError("未找到要删除的颗粒。")
         audit_item["particle"] = particles.pop(index)
+    elif action_type == "split":
+        particle_id = str(action.get("particle_id", ""))
+        index = next((i for i, item in enumerate(particles) if item["id"] == particle_id), None)
+        if index is None:
+            raise ValueError("未找到要拆分的颗粒。")
+        replacements_payload = action.get("particles")
+        if not isinstance(replacements_payload, list) or len(replacements_payload) != 2:
+            raise ValueError("拆分操作必须提供两颗新颗粒。")
+        replacements = []
+        for payload in replacements_payload:
+            x = float(payload["x_px"])
+            y = float(payload["y_px"])
+            length_um = float(payload["length_um"])
+            if not all(math.isfinite(value) for value in (x, y, length_um)):
+                raise ValueError("拆分颗粒参数不是有效数字。")
+            if length_um <= 25 or length_um > 100000:
+                raise ValueError("拆分后的颗粒尺寸必须大于 25 μm。")
+            if not _inside_region(x, y, result["region"]):
+                raise ValueError("拆分后的颗粒必须位于统计区域内。")
+            replacements.append(_manual_particle(x, y, length_um, float(result["um_per_px"])))
+        audit_item["particle"] = particles.pop(index)
+        audit_item["replacements"] = replacements
+        particles.extend(replacements)
     elif action_type == "undo":
         target = next((item for item in reversed(audit) if not item.get("undone")), None)
         if target is None:
@@ -144,6 +167,10 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
         if target["type"] == "add":
             particles[:] = [item for item in particles if item["id"] != particle["id"]]
         elif target["type"] == "remove":
+            particles.append(particle)
+        elif target["type"] == "split":
+            replacement_ids = {item["id"] for item in target["replacements"]}
+            particles[:] = [item for item in particles if item["id"] not in replacement_ids]
             particles.append(particle)
         else:
             raise ValueError("上一项操作无法撤销。")
