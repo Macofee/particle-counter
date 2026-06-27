@@ -19,6 +19,21 @@ BIN_DEFINITIONS = (
     (200.0, math.inf, "n>200", (180, 51, 170)),
 )
 
+# Yellow scale-gap detection thresholds — tuned for the standard yellow
+# double-stroke printed in the lower-right corner of microscope images.
+_YELLOW_HSV_LOWER = (20, 130, 135)
+_YELLOW_HSV_UPPER = (45, 255, 255)
+_YELLOW_MASK_TOP_FRAC = 0.60   # ignore upper portion of image
+_YELLOW_MASK_LEFT_FRAC = 0.55  # ignore left portion of image
+_YELLOW_MIN_AREA = 300
+_YELLOW_MIN_HEIGHT = 40
+_YELLOW_MIN_WIDTH = 20
+_YELLOW_TALL_COL_FLOOR = 10       # minimum column count when max is small
+_YELLOW_TALL_COL_FRAC = 0.72      # fraction of max column count for "tall"
+_YELLOW_MIN_COLUMN_RUNS = 2       # need at least 2 distinct vertical strokes
+_YELLOW_MIN_GAP_PX = 12
+_YELLOW_MAX_GAP_FRAC = 0.10       # gap relative to image width
+
 
 @dataclass
 class AnalysisSettings:
@@ -48,27 +63,38 @@ def detect_yellow_scale_gap(image: np.ndarray) -> tuple[float, dict]:
     """Return center-to-center spacing of the two yellow scale strokes."""
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    yellow = cv2.inRange(hsv, np.array([20, 130, 135]), np.array([45, 255, 255]))
-    yellow[: int(height * 0.60), :] = 0
-    yellow[:, : int(width * 0.55)] = 0
+    yellow = cv2.inRange(
+        hsv,
+        np.array(_YELLOW_HSV_LOWER),
+        np.array(_YELLOW_HSV_UPPER),
+    )
+    yellow[: int(height * _YELLOW_MASK_TOP_FRAC), :] = 0
+    yellow[:, : int(width * _YELLOW_MASK_LEFT_FRAC)] = 0
 
     component_count, labels, stats, _ = cv2.connectedComponentsWithStats(yellow)
     candidates = []
     for component_id in range(1, component_count):
         x, y, w, h, area = stats[component_id]
-        if area < 300 or h < 40 or w < 20:
+        if area < _YELLOW_MIN_AREA or h < _YELLOW_MIN_HEIGHT or w < _YELLOW_MIN_WIDTH:
             continue
         component = labels[y : y + h, x : x + w] == component_id
         column_counts = component.sum(axis=0)
-        tall_columns = np.where(column_counts >= max(10, int(column_counts.max() * 0.72)))[0]
-        column_runs = [run for run in _runs(tall_columns) if run[1] - run[0] + 1 >= 2]
-        if len(column_runs) < 2:
+        tall_columns = np.where(
+            column_counts
+            >= max(_YELLOW_TALL_COL_FLOOR, int(column_counts.max() * _YELLOW_TALL_COL_FRAC))
+        )[0]
+        column_runs = [
+            run
+            for run in _runs(tall_columns)
+            if run[1] - run[0] + 1 >= _YELLOW_MIN_COLUMN_RUNS
+        ]
+        if len(column_runs) < _YELLOW_MIN_COLUMN_RUNS:
             continue
         left, right = column_runs[-2], column_runs[-1]
         left_center = x + (left[0] + left[1]) / 2.0
         right_center = x + (right[0] + right[1]) / 2.0
         gap = float(math.floor((right_center - left_center) + 0.5))
-        if 12 <= gap <= width * 0.10:
+        if _YELLOW_MIN_GAP_PX <= gap <= width * _YELLOW_MAX_GAP_FRAC:
             score = area + x + y
             candidates.append(
                 (
@@ -139,6 +165,15 @@ def analyze_image(
     image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError("图片无法读取，请使用 JPG、PNG、TIFF 或 BMP 文件。")
+
+    # Normalize 16-bit and grayscale images so downstream color operations
+    # (HSV conversion, yellow detection) are safe.
+    if image.dtype == np.uint16:
+        image = (image / 257).astype(np.uint8)
+    if len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.shape[2] == 1:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
     result_dir.mkdir(parents=True, exist_ok=True)
     height, width = image.shape[:2]
@@ -258,35 +293,43 @@ def analyze_image(
     metadata_path = result_dir / "analysis.json"
     bundle_path = result_dir / "result_bundle.zip"
 
-    cv2.imwrite(str(annotated_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 94])
-    preview_scale = min(1.0, 1900.0 / max(width, height))
-    preview = cv2.resize(
-        annotated,
-        (0, 0),
-        fx=preview_scale,
-        fy=preview_scale,
-        interpolation=cv2.INTER_AREA,
-    )
-    cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, 91])
-
-    with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.writer(file)
-        writer.writerow(["颗粒规格_um（最大长度）", "数量"])
-        for count, (_, _, label, _) in zip(counts, BIN_DEFINITIONS):
-            writer.writerow([label, count])
-        writer.writerow(["合计", sum(counts)])
-        writer.writerow([])
-        writer.writerow(["比例换算", f"{scale_px:.2f} px = {settings.scale_um:g} um"])
-        writer.writerow(["识别参数", f"边缘={settings.edge_threshold}; 深色核心={settings.seed_threshold}"])
-
-    with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=["编号", "center_x_px", "center_y_px", "length_px", "length_um", "pixel_area", "bin"],
+    try:
+        cv2.imwrite(str(annotated_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 94])
+        preview_scale = min(1.0, 1900.0 / max(width, height))
+        preview = cv2.resize(
+            annotated,
+            (0, 0),
+            fx=preview_scale,
+            fy=preview_scale,
+            interpolation=cv2.INTER_AREA,
         )
-        writer.writeheader()
-        for index, record in enumerate(sorted(records, key=lambda item: (item["center_y_px"], item["center_x_px"])), 1):
-            writer.writerow({"编号": index, **record})
+        cv2.imwrite(str(preview_path), preview, [cv2.IMWRITE_JPEG_QUALITY, 91])
+    except Exception as exc:
+        raise OSError(f"写入标注图片失败，请检查磁盘空间和目录权限：{exc}") from exc
+
+    try:
+        with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.writer(file)
+            writer.writerow(["颗粒规格_um（最大长度）", "数量"])
+            for count, (_, _, label, _) in zip(counts, BIN_DEFINITIONS):
+                writer.writerow([label, count])
+            writer.writerow(["合计", sum(counts)])
+            writer.writerow([])
+            writer.writerow(["比例换算", f"{scale_px:.2f} px = {settings.scale_um:g} um"])
+            writer.writerow(["识别参数", f"边缘={settings.edge_threshold}; 深色核心={settings.seed_threshold}"])
+
+        with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=["编号", "center_x_px", "center_y_px", "length_px", "length_um", "pixel_area", "bin"],
+            )
+            writer.writeheader()
+            for index, record in enumerate(sorted(records, key=lambda item: (item["center_y_px"], item["center_x_px"])), 1):
+                writer.writerow({"编号": index, **record})
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"写入 CSV 结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
 
     result = {
         "image": {"width": width, "height": height, "name": image_path.name},
@@ -304,10 +347,20 @@ def analyze_image(
         },
         "settings": asdict(settings),
     }
-    metadata_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        metadata_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"写入分析元数据失败，请检查磁盘空间和目录权限：{exc}") from exc
 
-    with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in (annotated_path, preview_path, summary_path, measurements_path, metadata_path):
-            archive.write(path, arcname=path.name)
+    try:
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in (annotated_path, preview_path, summary_path, measurements_path, metadata_path):
+                archive.write(path, arcname=path.name)
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"打包结果文件失败，请检查磁盘空间和目录权限：{exc}") from exc
 
     return result

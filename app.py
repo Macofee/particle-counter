@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/files/"):
             parts = path.strip("/").split("/")
-            if len(parts) != 3 or not re.fullmatch(r"[a-f0-9]{12}", parts[1]):
+            if len(parts) != 3 or not re.fullmatch(r"[a-f0-9]{32}", parts[1]):
                 self.send_error(HTTPStatus.BAD_REQUEST)
                 return
             candidate = (RESULTS / parts[1] / Path(parts[2]).name).resolve()
@@ -123,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
             if not upload:
                 raise ValueError("请选择一张图片。")
 
-            job_id = uuid.uuid4().hex[:12]
+            job_id = uuid.uuid4().hex
             suffix = Path(upload["filename"]).suffix.lower() or ".jpg"
             if suffix not in ALLOWED_IMAGE_SUFFIXES:
                 raise ValueError("文件格式不支持，请使用 JPG、PNG、TIFF 或 BMP 图片。")
