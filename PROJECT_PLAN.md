@@ -24,11 +24,27 @@
   └─ 结果及文件下载
           │ 本机 HTTP
 Python 本地服务
-  ├─ 上传与任务管理
-  ├─ OpenCV 颗粒识别引擎
-  ├─ 标尺自动检测
-  └─ CSV / JPG / ZIP 导出
+  ├─ 上传与任务管理          (app.py, ~210 行)
+  ├─ OpenCV 颗粒识别引擎     (engine.py, ~400 行)
+  ├─ 标尺自动检测            (detect_yellow_scale_gap)
+  └─ CSV / JPG / ZIP 导出    (_write_result_files)
 ```
+
+engine.py 模块拆分：
+
+| 函数 | 职责 |
+|------|------|
+| `_read_and_normalize` | 图片读取 + 16-bit/灰度图归一化 |
+| `detect_yellow_scale_gap` | 黄色比例尺双竖线自动检测 |
+| `_make_ellipse_mask` | 椭圆 ROI 蒙版生成 |
+| `_runs` / `_bin_index` / `_maximum_feret_diameter` | 工具函数（连续区间、分桶、凸包直径） |
+| `analyze_image` | 主分析管道（134 行） |
+| `_write_result_files` | 结果文件写入（图片/CSV/JSON/ZIP） |
+
+模块级可调参数（`_*` 前缀常量，共 27 个）：
+
+- 黄色检测：`_YELLOW_HSV_LOWER/UPPER`、`_YELLOW_MIN_AREA` 等 11 个
+- 分析参数：`_GAUSSIAN_SIGMA_*`、`_BKG_GRAY_MAX`、`_JPEG_QUALITY_*` 等 16 个
 
 运行时仅依赖 Python、NumPy 和 OpenCV，不依赖云服务或数据库。
 
