@@ -9,13 +9,20 @@
 
 ## 启动
 
-在 macOS 上双击 `启动颗粒度计数台.command`。浏览器会自动打开 `http://127.0.0.1:8765`。
+### macOS
 
-也可在终端运行：
+双击 `启动颗粒度计数台.command`。浏览器会自动打开 `http://127.0.0.1:8765`。
+
+### Windows
+
+双击 `启动颗粒度计数台.bat`。首次运行会自动安装依赖。浏览器打开 `http://127.0.0.1:8765`。
+
+### 命令行
 
 ```bash
-cd /Users/p.zhang/Documents/Codex/2026-06-27/wo/outputs/particle_counter
-python3 app.py
+cd 项目目录
+pip install -r requirements.txt
+python app.py
 ```
 
 ## 使用
@@ -57,14 +64,31 @@ python3 batch.py 原图文件夹 新的空输出文件夹 \
 
 为保护已有数据，输出文件夹非空时程序会停止，不会覆盖或删除文件。
 
-## 构建 macOS 应用
+## 构建桌面应用
+
+PyInstaller **不支持交叉编译**，需在目标平台上执行。
+
+### macOS
 
 ```bash
 python3 -m pip install -r requirements-build.txt
 ./packaging/build_macos_app.command
 ```
 
-产物位于 `dist/颗粒度计数台.app`，以无终端窗口模式运行。应用数据保存在 `~/Library/Application Support/ParticleCounter`。构建脚本不会覆盖已有 `.app`。
+产物位于 `dist/颗粒度计数台.app`，以无终端窗口模式运行。打包的应用数据保存在 `~/Library/Application Support/ParticleCounter`。
+
+### Windows
+
+在 Windows 终端（cmd 或 PowerShell）中：
+
+```bat
+pip install -r requirements-build.txt
+packaging\build_windows_app.bat
+```
+
+或者直接双击 `packaging\build_windows_app.bat`。
+
+产物位于 `dist\颗粒度计数台.exe`。打包的应用数据保存在 `%APPDATA%\ParticleCounter`。
 
 ## 开发记录
 

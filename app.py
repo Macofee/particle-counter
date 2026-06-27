@@ -4,6 +4,7 @@ import json
 import math
 import mimetypes
 import os
+import platform
 import re
 import sys
 import threading
@@ -23,11 +24,21 @@ from review import apply_review_action
 
 ROOT = Path(__file__).resolve().parent
 STATIC = Path(getattr(sys, "_MEIPASS", ROOT)) / "static"
-DATA_ROOT = (
-    Path.home() / "Library" / "Application Support" / "ParticleCounter"
-    if getattr(sys, "frozen", False)
-    else ROOT / "data"
-)
+
+
+def _get_app_data_dir() -> Path:
+    """Platform-appropriate application data directory for frozen bundles."""
+    system = platform.system()
+    if system == "Windows":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif system == "Darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "ParticleCounter"
+
+
+DATA_ROOT = _get_app_data_dir() if getattr(sys, "frozen", False) else ROOT / "data"
 UPLOADS = DATA_ROOT / "uploads"
 RESULTS = DATA_ROOT / "results"
 UPLOADS.mkdir(parents=True, exist_ok=True)
