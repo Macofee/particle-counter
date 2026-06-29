@@ -143,6 +143,24 @@ packaging\build_windows_app.bat
 | `packaging/build_windows_app.bat` | 新建 Windows PyInstaller 打包脚本 |
 | `README.md` | 启动与构建章节增加 Windows 说明 |
 
+#### 第六轮 — 英文 Windows 兼容性修复（分支 `fix/english-windows-image-import`）
+
+> **背景**：在英文 Windows 操作系统中，导入图片后点击"开始统计"无任何响应。经排查发现三类根因：OpenCV 在 Windows 上不支持 UTF-8 路径、HTTP 异常处理存在双重故障逃逸、前端缺少超时和空值防护。
+
+| 文件 | 修复内容 |
+|------|----------|
+| `engine.py` | `cv2.imread` → `np.frombuffer` + `cv2.imdecode`；`cv2.imwrite` → `cv2.imencode` + `write_bytes`，避免 Windows C 运行时 `fopen` 对 Unicode 路径不兼容 |
+| `engine.py` | `analyze_image` 返回值中 `round(numpy_float64, N)` 显式转为 Python `float()`，避免 numpy < 1.24 时 `json.dumps` 抛 `TypeError` |
+| `app.py` | `send_json` 内部捕获 `ConnectionError`/`OSError`，防止客户端断连时异常逃逸出 `do_POST` 导致 HTTP 线程静默死亡 |
+| `app.py` | 模块级 `mkdir` 移入 `_ensure_data_dirs()` 函数，由 `main()` 显式调用，失败时打印错误并以非零退出码退出 |
+| `app.py` | `do_GET` 添加 `try/except` 保护；`main()` 中 Windows 控制台适配 UTF-8 编码，防止 `print()` 中文导致 `UnicodeEncodeError` |
+| `static/app.js` | 分析请求添加 2 分钟超时（`AbortController`）；修正 `response.json()` 调用顺序（先检查 `ok` 再解析）；`submitReview` 添加 30 秒超时 |
+| `static/app.js` | `renderResult` 添加 `data`/`files`/`bins` null 安全检查；`setFile` 同时检查扩展名和 MIME 类型，兼容 TIFF/BMP |
+| `启动颗粒度计数台.bat` | 移除 `2>nul`，添加 pip 依赖安装错误检查；设置 `PYTHONUTF8=1` 环境变量 |
+| `tests/test_engine.py` | 更新 `test_false_imencode_result_raises_os_error`：mock 从 `cv2.imwrite` 改为 `cv2.imencode` |
+
+测试覆盖：仍为 **27** 个测试全部通过，回归验证通过。
+
 #### 其他
 
 | 提交 | 说明 |
