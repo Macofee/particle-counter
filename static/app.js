@@ -53,6 +53,7 @@ const imageFrame = $('#imageFrame');
 const emptyState = $('#emptyState');
 const regionOverlay = $('#regionOverlay');
 const processing = $('#processing');
+const processingOverlay = $('#processingOverlay');
 const results = $('#results');
 const errorMessage = $('#errorMessage');
 const stage = $('#stage');
@@ -213,6 +214,7 @@ async function submitReview(action) {
   if (!currentResult) return;
   setReviewMode(null);
   processing.classList.remove('hidden');
+  processingOverlay.classList.remove('hidden');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {
@@ -246,6 +248,7 @@ async function submitReview(action) {
   } finally {
     clearTimeout(timeout);
     processing.classList.add('hidden');
+    processingOverlay.classList.add('hidden');
   }
 }
 
@@ -444,6 +447,7 @@ analyzeButton.addEventListener('click', async () => {
   errorMessage.textContent = '';
   analyzeButton.disabled = true;
   processing.classList.remove('hidden');
+  processingOverlay.classList.remove('hidden');
   results.classList.add('hidden');
 
   const form = new FormData();
@@ -494,6 +498,7 @@ analyzeButton.addEventListener('click', async () => {
   } finally {
     clearTimeout(timeout);
     processing.classList.add('hidden');
+    processingOverlay.classList.add('hidden');
     analyzeButton.disabled = false;
   }
 });

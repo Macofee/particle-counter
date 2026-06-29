@@ -257,6 +257,47 @@ class ImageIoReliabilityTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "未能编码"):
                 _checked_imwrite(Path("preview.jpg"), np.zeros((1, 1, 3), dtype=np.uint8), [])
 
+    def test_unicode_path_read_and_write(self):
+        """验证中文/Unicode 路径下的图片能被读取并写出结果。
+
+        在英文 Windows 上，OpenCV 的 cv2.imread/cv2.imwrite 因 C 运行时
+        fopen 不支持 UTF-8 路径而失败。本测试用 Python Path 写入字节，
+        确保 analyze_image 的 imdecode + imencode 路径能正确处理 Unicode。
+        """
+        image = AnalyzeImageIntegrationTests._make_particle_image()
+        with tempfile.TemporaryDirectory(prefix="中文测试_") as tmpdir:
+            image_path = Path(tmpdir) / "显微照片_示例.png"
+            # 用 cv2.imencode + write_bytes 写入，避免依赖 cv2.imwrite 的 Unicode 支持
+            success, buf = cv2.imencode(image_path.suffix, image)
+            self.assertTrue(success)
+            image_path.write_bytes(buf.tobytes())
+
+            result_dir = Path(tmpdir) / "结果输出_示例"
+            settings = AnalysisSettings(
+                scale_um=500.0,
+                scale_px=None,  # 依赖自动黄色比例尺检测
+                center_x=0.50,
+                center_y=0.50,
+                radius_x=0.45,
+                radius_y=0.42,
+                edge_threshold=20,
+                seed_threshold=40,
+                guard_um=130.0,
+                min_size_um=25.0,
+            )
+
+            result = analyze_image(image_path, result_dir, settings)
+
+            self.assertGreaterEqual(result["total"], 1, "应检测到至少一颗颗粒")
+            self.assertTrue((result_dir / "annotated.jpg").is_file())
+            self.assertTrue((result_dir / "preview.jpg").is_file())
+            self.assertTrue((result_dir / "summary.csv").is_file())
+            self.assertTrue((result_dir / "measurements.csv").is_file())
+            self.assertTrue((result_dir / "analysis.json").is_file())
+            self.assertTrue((result_dir / "result_bundle.zip").is_file())
+            self.assertTrue((result_dir / "report.pdf").is_file())
+            self.assertTrue((result_dir / result["source"]["file"]).is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

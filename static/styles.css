@@ -197,10 +197,11 @@ input[type="range"] { grid-column: 1 / -1; accent-color: var(--blue); width: 100
 .zoom-toolbar button:hover:not(:disabled) { color: var(--amber); background: rgba(255,255,255,.08); }
 .zoom-toolbar button:disabled { opacity: .35; cursor: not-allowed; }
 .zoom-toolbar .zoom-readout { color: var(--amber); font: 700 11px/1 "SFMono-Regular", Consolas, monospace; }
-.processing { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(14,37,46,.72); color: white; z-index: 5; }
+.processing-overlay { position: absolute; inset: 0; background: rgba(14,37,46,.72); z-index: 5; }
+.processing { position: absolute; inset: 0; display: grid; place-items: center; color: white; z-index: 6; pointer-events: none; }
 .processing p { padding-top: 60px; font-size: 13px; }
-.scan-line { position: absolute; left: 12%; right: 12%; height: 2px; background: var(--amber); box-shadow: 0 0 18px var(--amber); animation: scan 1.8s ease-in-out infinite alternate; }
-@keyframes scan { from { transform: translateY(-220px); } to { transform: translateY(220px); } }
+.scan-line { position: absolute; left: 12%; right: 12%; top: 0; height: 2px; background: var(--amber); box-shadow: 0 0 18px var(--amber); animation: scan 1.8s ease-in-out infinite alternate; }
+@keyframes scan { from { top: 0; } to { top: calc(100% - 2px); } }
 
 .results { margin-top: 20px; padding: 22px; background: var(--paper); border: 1px solid rgba(21,38,46,.13); box-shadow: var(--shadow); }
 .result-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
