@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 from engine import ALGORITHM_VERSION, AnalysisSettings, analyze_image
 from review import apply_review_action
 
-SOFTWARE_VERSION = "1.0.0"
+SOFTWARE_VERSION = "1.0.1"
 
 ROOT = Path(__file__).resolve().parent
 STATIC = Path(getattr(sys, "_MEIPASS", ROOT)) / "static"
