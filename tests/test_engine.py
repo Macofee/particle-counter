@@ -252,9 +252,9 @@ class ImageIoReliabilityTests(unittest.TestCase):
         self.assertEqual(normalized.shape, (1, 1, 3))
         self.assertEqual(normalized[0, 0].tolist(), [10, 20, 30])
 
-    def test_false_imwrite_result_raises_os_error(self):
-        with patch("engine.cv2.imwrite", return_value=False):
-            with self.assertRaisesRegex(OSError, "未能写入"):
+    def test_false_imencode_result_raises_os_error(self):
+        with patch("engine.cv2.imencode", return_value=(False, None)):
+            with self.assertRaisesRegex(OSError, "未能编码"):
                 _checked_imwrite(Path("preview.jpg"), np.zeros((1, 1, 3), dtype=np.uint8), [])
 
 
