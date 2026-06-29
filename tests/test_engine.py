@@ -113,11 +113,15 @@ class YellowScaleDetectionTests(unittest.TestCase):
         bridge_y = top_y + stroke_h - 8
         cv2.rectangle(image, (left_x, bridge_y), (right_x + stroke_w, top_y + stroke_h), yellow_bgr, cv2.FILLED)
 
-    def test_detects_standard_gap(self):
+    def test_detects_outer_edge_distance(self):
         image = self._make_image()
         self._draw_scale_strokes(image, gap_px=36)
         gap, meta = detect_yellow_scale_gap(image)
-        self.assertAlmostEqual(gap, 36.0, delta=3.0)
+        # 两条竖线各宽 25 px（OpenCV 矩形端点均包含），中心距 36 px，
+        # 因此外侧边缘距离为 36 + 24 = 60 px。
+        self.assertAlmostEqual(gap, 60.0, delta=3.0)
+        self.assertEqual(meta["measurement"], "outer_edges")
+        self.assertIn("outer_edges_px", meta)
         self.assertIn("line_centers_px", meta)
         self.assertIn("component_bbox", meta)
 
@@ -195,6 +199,30 @@ class AnalyzeImageIntegrationTests(unittest.TestCase):
             with zipfile.ZipFile(result_dir / "result_bundle.zip") as archive:
                 self.assertIn("report.pdf", archive.namelist())
                 self.assertIn(result["source"]["file"], archive.namelist())
+
+    def test_vda_mode_reports_standard_bins_and_resolution_evidence(self):
+        image = self._make_particle_image()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "vda_particle.png"
+            cv2.imwrite(str(image_path), image)
+            result_dir = Path(tmpdir) / "vda_results"
+            settings = AnalysisSettings(
+                analysis_mode="vda19_1",
+                scale_um=500.0,
+                scale_px=100.0,
+                center_x=0.50,
+                center_y=0.50,
+                radius_x=0.45,
+                radius_y=0.42,
+                guard_um=130.0,
+            )
+
+            result = analyze_image(image_path, result_dir, settings)
+
+            self.assertEqual(result["analysis_mode"]["key"], "vda19_1")
+            self.assertEqual([item["code"] for item in result["bins"]], list("EFGHIJKLMN"))
+            self.assertTrue(result["resolution_check"]["compliant"])
+            self.assertEqual(result["settings"]["min_size_um"], 50.0)
 
     def test_grayscale_image_is_normalized(self):
         """验证灰度图输入能被正确归一化为三通道 BGR，不崩溃。"""

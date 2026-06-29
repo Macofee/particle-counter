@@ -9,14 +9,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from analysis_modes import AnalysisMode, get_analysis_mode
 from engine import (
-    BIN_DEFINITIONS,
-    BIN_DISPLAY,
     _CONTOUR_THICKNESS,
     _REGION_ELLIPSE_COLOR,
     _REGION_ELLIPSE_THICKNESS,
     AnalysisSettings,
-    _bin_index,
+    _display_bins,
     _read_and_normalize,
     _write_result_files,
 )
@@ -30,7 +29,13 @@ def _inside_region(x: float, y: float, region: dict) -> bool:
     return ((x - region["center_x_px"]) / rx) ** 2 + ((y - region["center_y_px"]) / ry) ** 2 <= 1
 
 
-def _manual_particle(x: float, y: float, length_um: float, um_per_px: float) -> dict:
+def _manual_particle(
+    x: float,
+    y: float,
+    length_um: float,
+    um_per_px: float,
+    mode: AnalysisMode,
+) -> dict:
     length_px = length_um / um_per_px
     radius = max(1, int(round(length_px / 2)))
     contour = cv2.ellipse2Poly(
@@ -41,7 +46,7 @@ def _manual_particle(x: float, y: float, length_um: float, um_per_px: float) -> 
         360,
         20,
     )
-    bin_index = _bin_index(length_um)
+    size_bin = mode.classify(length_um)
     return {
         "id": f"manual-{uuid.uuid4().hex}",
         "source": "manual",
@@ -50,14 +55,14 @@ def _manual_particle(x: float, y: float, length_um: float, um_per_px: float) -> 
         "length_px": round(length_px, 3),
         "length_um": round(length_um, 2),
         "pixel_area": int(round(math.pi * radius * radius)),
-        "bin": BIN_DEFINITIONS[bin_index][2],
+        "bin": size_bin.label,
         "contour_px": contour.tolist(),
     }
 
 
-def _render_annotated(source: np.ndarray, result: dict) -> np.ndarray:
+def _render_annotated(source: np.ndarray, result: dict, mode: AnalysisMode) -> np.ndarray:
     annotated = source.copy()
-    labels = [definition[2] for definition in BIN_DEFINITIONS]
+    labels = [size_bin.label for size_bin in mode.bins]
     for particle in result["particles"]:
         try:
             bin_index = labels.index(particle["bin"])
@@ -68,7 +73,7 @@ def _render_annotated(source: np.ndarray, result: dict) -> np.ndarray:
             annotated,
             [contour],
             -1,
-            BIN_DEFINITIONS[bin_index][3],
+            mode.bins[bin_index].color_bgr,
             _CONTOUR_THICKNESS,
             cv2.LINE_AA,
         )
@@ -87,8 +92,8 @@ def _render_annotated(source: np.ndarray, result: dict) -> np.ndarray:
     return annotated
 
 
-def _recount(result: dict) -> list[int]:
-    labels = [definition[2] for definition in BIN_DEFINITIONS]
+def _recount(result: dict, mode: AnalysisMode) -> list[int]:
+    labels = [size_bin.label for size_bin in mode.bins]
     counts = [0] * len(labels)
     for particle in result["particles"]:
         try:
@@ -96,7 +101,7 @@ def _recount(result: dict) -> list[int]:
         except ValueError as error:
             raise ValueError(f"未知颗粒分档：{particle['bin']}") from error
     result["counts"] = counts
-    result["bins"] = [{**display, "count": count} for display, count in zip(BIN_DISPLAY, counts)]
+    result["bins"] = _display_bins(mode, counts)
     result["total"] = sum(counts)
     return counts
 
@@ -107,9 +112,15 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
     if not metadata_path.is_file() or not source_path.is_file():
         raise ValueError("该结果不支持人工复核，请重新分析原图。")
     result = json.loads(metadata_path.read_text(encoding="utf-8"))
+    mode = get_analysis_mode(result.get("settings", {}).get("analysis_mode", "custom"))
     particles = result.setdefault("particles", [])
     audit = result.setdefault("review_audit", [])
     action_type = action.get("type")
+    if mode.key == "vda19_1" and action_type in {"add", "split"}:
+        raise ValueError(
+            "VDA 19.1 模式下新增或拆分颗粒必须基于真实轮廓重新测量，"
+            "当前版本不接受手工输入尺寸。"
+        )
     audit_item = {
         "id": uuid.uuid4().hex,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -123,11 +134,11 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
         length_um = float(action["length_um"])
         if not all(math.isfinite(value) for value in (x, y, length_um)):
             raise ValueError("人工颗粒参数不是有效数字。")
-        if length_um <= 25 or length_um > 100000:
-            raise ValueError("人工颗粒尺寸必须大于 25 μm。")
+        if length_um > 100000:
+            raise ValueError("人工颗粒尺寸不能大于 100000 μm。")
         if not _inside_region(x, y, result["region"]):
             raise ValueError("人工颗粒必须位于统计区域内。")
-        particle = _manual_particle(x, y, length_um, float(result["um_per_px"]))
+        particle = _manual_particle(x, y, length_um, float(result["um_per_px"]), mode)
         particles.append(particle)
         audit_item["particle"] = particle
     elif action_type == "remove":
@@ -151,11 +162,13 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
             length_um = float(payload["length_um"])
             if not all(math.isfinite(value) for value in (x, y, length_um)):
                 raise ValueError("拆分颗粒参数不是有效数字。")
-            if length_um <= 25 or length_um > 100000:
-                raise ValueError("拆分后的颗粒尺寸必须大于 25 μm。")
+            if length_um > 100000:
+                raise ValueError("拆分后的颗粒尺寸不能大于 100000 μm。")
             if not _inside_region(x, y, result["region"]):
                 raise ValueError("拆分后的颗粒必须位于统计区域内。")
-            replacements.append(_manual_particle(x, y, length_um, float(result["um_per_px"])))
+            replacements.append(
+                _manual_particle(x, y, length_um, float(result["um_per_px"]), mode)
+            )
         audit_item["particle"] = particles.pop(index)
         audit_item["replacements"] = replacements
         particles.extend(replacements)
@@ -182,9 +195,9 @@ def apply_review_action(result_dir: Path, action: dict, actor: str = "操作员"
         raise ValueError("未知的人工复核操作。")
 
     audit.append(audit_item)
-    counts = _recount(result)
+    counts = _recount(result, mode)
     source = _read_and_normalize(source_path)
-    annotated = _render_annotated(source, result)
+    annotated = _render_annotated(source, result, mode)
     settings = AnalysisSettings(**result["settings"])
     _write_result_files(
         result_dir,
