@@ -184,6 +184,9 @@ function showReviewMessage(message, isError = false) {
 }
 
 function renderResult(data, preserveZoom = false) {
+  if (!data || !data.files || !data.bins) {
+    throw new Error('分析结果数据不完整，请重试。');
+  }
   currentResult = data;
   resetZoomOnNextImage = !preserveZoom;
   previewImage.src = `${data.files.preview}?t=${Date.now()}`;
@@ -210,6 +213,8 @@ async function submitReview(action) {
   if (!currentResult) return;
   setReviewMode(null);
   processing.classList.remove('hidden');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     const response = await fetch('/api/review', {
       method: 'POST',
@@ -219,13 +224,27 @@ async function submitReview(action) {
         actor: $('#reviewActor').value,
         action,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+    if (!response.ok) {
+      let message = '人工复核失败。';
+      try {
+        const errorData = await response.json();
+        if (errorData.error) message = errorData.error;
+      } catch (_) {}
+      throw new Error(message);
+    }
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '人工复核失败。');
     renderResult(data, true);
   } catch (error) {
-    showReviewMessage(error.message, true);
+    if (error.name === 'AbortError') {
+      showReviewMessage('人工复核超时，请重试。', true);
+    } else {
+      showReviewMessage(error.message, true);
+    }
   } finally {
+    clearTimeout(timeout);
     processing.classList.add('hidden');
   }
 }
@@ -377,8 +396,17 @@ $('#deleteTemplate').addEventListener('click', () => {
 });
 
 function setFile(file) {
-  if (!file || !file.type.startsWith('image/')) {
+  if (!file) {
     errorMessage.textContent = '请选择图片文件。';
+    return;
+  }
+  // 英文 Windows 上部分图片格式（TIFF/BMP）的 MIME 检测可能返回空字符串，
+  // 因此同时通过扩展名和 MIME 类型判断，避免误拒有效图片。
+  const validExts = ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp'];
+  const hasValidExt = validExts.some((ext) => file.name.toLowerCase().endsWith(ext));
+  const isImageType = file.type === '' || file.type.startsWith('image/');
+  if (!hasValidExt || !isImageType) {
+    errorMessage.textContent = '文件格式不支持，请使用 JPG、PNG、TIFF 或 BMP 图片。';
     return;
   }
   selectedFile = file;
@@ -435,16 +463,36 @@ analyzeButton.addEventListener('click', async () => {
   appendField(form, 'inspection_date', '#inspectionDate');
   appendField(form, 'notes', '#reportNotes');
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
   try {
-    const response = await fetch('/api/analyze', { method: 'POST', body: form });
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) {
+      let message = `服务器错误 (${response.status})`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error) message = errorData.error;
+      } catch (_) {}
+      throw new Error(message);
+    }
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '分析失败。');
 
     renderResult(data);
     results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (error) {
-    errorMessage.textContent = error.message;
+    if (error.name === 'AbortError') {
+      errorMessage.textContent = '分析超时，请检查图片大小或网络后重试。';
+    } else {
+      errorMessage.textContent = error.message || '分析失败，请检查服务是否正常运行。';
+    }
   } finally {
+    clearTimeout(timeout);
     processing.classList.add('hidden');
     analyzeButton.disabled = false;
   }

@@ -42,8 +42,16 @@ def _get_app_data_dir() -> Path:
 DATA_ROOT = _get_app_data_dir() if getattr(sys, "frozen", False) else ROOT / "data"
 UPLOADS = DATA_ROOT / "uploads"
 RESULTS = DATA_ROOT / "results"
-UPLOADS.mkdir(parents=True, exist_ok=True)
-RESULTS.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_data_dirs() -> None:
+    """创建数据目录；失败时打印错误并退出，避免静默崩溃。"""
+    try:
+        UPLOADS.mkdir(parents=True, exist_ok=True)
+        RESULTS.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"无法创建数据目录：{exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 MAX_UPLOAD_BYTES = 350 * 1024 * 1024
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 MAX_REVIEW_BYTES = 64 * 1024
@@ -98,12 +106,16 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {fmt % args}")
 
     def send_json(self, payload: dict, status: int = 200) -> None:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        """发送 JSON 响应；客户端断开时静默处理，避免线程崩溃。"""
+        try:
+            data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (ConnectionError, OSError):
+            pass
 
     def send_file(self, path: Path, download: bool = False) -> None:
         if not path.is_file():
@@ -121,34 +133,42 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
 
     def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        path = unquote(parsed.path)
-        if path == "/api/health":
-            self.send_json(
-                {
-                    "ok": True,
-                    "version": SOFTWARE_VERSION,
-                    "algorithm_version": ALGORITHM_VERSION,
-                }
-            )
-            return
-        if path.startswith("/files/"):
-            parts = path.strip("/").split("/")
-            if len(parts) != 3 or not re.fullmatch(r"[a-f0-9]{32}", parts[1]):
-                self.send_error(HTTPStatus.BAD_REQUEST)
+        try:
+            parsed = urlparse(self.path)
+            path = unquote(parsed.path)
+            if path == "/api/health":
+                self.send_json(
+                    {
+                        "ok": True,
+                        "version": SOFTWARE_VERSION,
+                        "algorithm_version": ALGORITHM_VERSION,
+                    }
+                )
                 return
-            candidate = (RESULTS / parts[1] / Path(parts[2]).name).resolve()
-            if RESULTS.resolve() not in candidate.parents:
+            if path.startswith("/files/"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 3 or not re.fullmatch(r"[a-f0-9]{32}", parts[1]):
+                    self.send_error(HTTPStatus.BAD_REQUEST)
+                    return
+                candidate = (RESULTS / parts[1] / Path(parts[2]).name).resolve()
+                if RESULTS.resolve() not in candidate.parents:
+                    self.send_error(HTTPStatus.FORBIDDEN)
+                    return
+                self.send_file(candidate, download=parts[2] != "preview.jpg")
+                return
+            static_name = "index.html" if path in ("", "/") else path.lstrip("/")
+            candidate = (STATIC / static_name).resolve()
+            if STATIC.resolve() not in candidate.parents and candidate != STATIC.resolve():
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
-            self.send_file(candidate, download=parts[2] != "preview.jpg")
-            return
-        static_name = "index.html" if path in ("", "/") else path.lstrip("/")
-        candidate = (STATIC / static_name).resolve()
-        if STATIC.resolve() not in candidate.parents and candidate != STATIC.resolve():
-            self.send_error(HTTPStatus.FORBIDDEN)
-            return
-        self.send_file(candidate)
+            self.send_file(candidate)
+        except (ConnectionError, OSError):
+            pass
+        except Exception:
+            try:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+            except Exception:
+                pass
 
     def do_POST(self) -> None:
         if self.path not in {"/api/analyze", "/api/review"}:
@@ -278,6 +298,18 @@ def open_browser(port: int) -> None:
 
 
 def main() -> None:
+    # Windows 控制台默认使用系统 ANSI 代码页（如 cp1252），
+    # 无法编码中文字符会导致 print() 抛出 UnicodeEncodeError。
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+
+    _ensure_data_dirs()
+
     port = int(os.environ.get("PARTICLE_COUNTER_PORT", "8765"))
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     if os.environ.get("PARTICLE_COUNTER_NO_BROWSER") != "1":

@@ -190,8 +190,14 @@ def _maximum_feret_diameter(contour: np.ndarray) -> float:
 
 
 def _read_and_normalize(image_path: Path) -> np.ndarray:
-    """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。"""
-    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。
+
+    使用 np.frombuffer + cv2.imdecode 替代 cv2.imread，避免 Windows 上
+    OpenCV C 运行时 fopen 对 UTF-8/Unicode 路径的不兼容问题。
+    """
+    data = image_path.read_bytes()
+    arr = np.frombuffer(data, dtype=np.uint8)
+    image = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError("图片无法读取，请使用 JPG、PNG、TIFF 或 BMP 文件。")
     if image.dtype == np.uint16:
@@ -210,9 +216,21 @@ def _read_and_normalize(image_path: Path) -> np.ndarray:
 
 
 def _checked_imwrite(path: Path, image: np.ndarray, params: list[int]) -> None:
-    """Write an image and turn OpenCV's False return into a visible failure."""
-    if not cv2.imwrite(str(path), image, params):
-        raise OSError(f"OpenCV 未能写入图片：{path.name}")
+    """Write an image and turn OpenCV's False return into a visible failure.
+
+    使用 cv2.imencode + write_bytes 替代 cv2.imwrite，避免 Windows 上
+    OpenCV C 运行时 fopen 对 UTF-8/Unicode 路径的不兼容问题。
+    """
+    ext = path.suffix or ".jpg"
+    success, buf = cv2.imencode(ext, image, params)
+    if not success:
+        raise OSError(f"OpenCV 未能编码图片：{path.name}")
+    try:
+        path.write_bytes(buf.tobytes())
+    except OSError:
+        raise
+    except Exception as exc:
+        raise OSError(f"写入图片失败：{path.name}：{exc}") from exc
 
 
 def _make_ellipse_mask(
@@ -446,8 +464,8 @@ def analyze_image(
                 "source": "automatic",
                 "center_x_px": int(round(centroids[label_id][0])) + x0,
                 "center_y_px": int(round(centroids[label_id][1])) + y0,
-                "length_px": round(length_px, 3),
-                "length_um": round(length_um, 2),
+                "length_px": float(round(length_px, 3)),
+                "length_um": float(round(length_um, 2)),
                 "pixel_area": int(pixel_area),
                 "bin": BIN_DEFINITIONS[bin_index][2],
                 "contour_px": contour_full.reshape(-1, 2).tolist(),
@@ -475,9 +493,9 @@ def analyze_image(
             for display, count in zip(BIN_DISPLAY, counts)
         ],
         "total": sum(counts),
-        "scale_px": round(scale_px, 2),
-        "scale_um": settings.scale_um,
-        "um_per_px": round(um_per_px, 5),
+        "scale_px": float(round(scale_px, 2)),
+        "scale_um": float(settings.scale_um),
+        "um_per_px": float(round(um_per_px, 5)),
         "scale_meta": scale_meta,
         "region": {
             "center_x_px": cx,
