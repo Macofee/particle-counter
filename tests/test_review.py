@@ -45,7 +45,7 @@ class ReviewWorkflowTests(unittest.TestCase):
             )
 
             self.assertEqual(reviewed["total"], original["total"] - 1)
-            self.assertEqual([item["code"] for item in reviewed["bins"]], list("EFGHIJKLMN"))
+            self.assertEqual([item["code"] for item in reviewed["bins"]], list("–EFGHIJKLMN"))
 
     def test_vda_review_rejects_typed_manual_particle_sizes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -220,9 +220,9 @@ class AnalyzeImageIntegrationTests(unittest.TestCase):
             result = analyze_image(image_path, result_dir, settings)
 
             self.assertEqual(result["analysis_mode"]["key"], "vda19_1")
-            self.assertEqual([item["code"] for item in result["bins"]], list("EFGHIJKLMN"))
+            self.assertEqual([item["code"] for item in result["bins"]], list("–EFGHIJKLMN"))
             self.assertTrue(result["resolution_check"]["compliant"])
-            self.assertEqual(result["settings"]["min_size_um"], 50.0)
+            self.assertEqual(result["resolution_check"]["minimum_size_um"], 50.0)
 
     def test_grayscale_image_is_normalized(self):
         """验证灰度图输入能被正确归一化为三通道 BGR，不崩溃。"""

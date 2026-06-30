@@ -6,7 +6,7 @@ import json
 import math
 import shutil
 import zipfile
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -517,8 +517,6 @@ def analyze_image(
     sample_metadata: Optional[dict] = None,
 ) -> dict:
     mode = get_analysis_mode(settings.analysis_mode)
-    if mode.key == "vda19_1" and settings.min_size_um != mode.minimum_size_um:
-        settings = replace(settings, min_size_um=mode.minimum_size_um)
     image = _read_and_normalize(image_path)
 
     result_dir.mkdir(parents=True, exist_ok=True)

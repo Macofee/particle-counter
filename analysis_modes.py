@@ -28,6 +28,8 @@ class AnalysisMode:
     minimum_size_um: float
     bins: tuple[SizeBin, ...]
     required_pixels: int | None = None
+    resolution_minimum_um: float | None = None
+    """Minimum particle size used for the resolution check; defaults to minimum_size_um."""
 
     def classify(self, length_um: float) -> SizeBin:
         for size_bin in self.bins:
@@ -46,17 +48,18 @@ class AnalysisMode:
         return minimum == first_bin.low_um and first_bin.include_low
 
     def validate_resolution(self, um_per_px: float) -> dict:
-        minimum_particle_pixels = self.minimum_size_um / um_per_px
+        target_um = self.resolution_minimum_um or self.minimum_size_um
+        minimum_particle_pixels = target_um / um_per_px
         compliant = self.required_pixels is None or minimum_particle_pixels >= self.required_pixels
         result = {
-            "minimum_size_um": self.minimum_size_um,
+            "minimum_size_um": target_um,
             "minimum_particle_pixels": round(minimum_particle_pixels, 2),
             "required_pixels": self.required_pixels,
             "compliant": compliant,
         }
         if not compliant:
             raise ValueError(
-                f"{self.name}要求 {self.minimum_size_um:g} μm 颗粒至少需要 "
+                f"{self.name}要求 {target_um:g} μm 颗粒至少需要 "
                 f"{self.required_pixels} 像素；当前仅 {minimum_particle_pixels:.2f} 像素。"
             )
         return result
@@ -77,8 +80,9 @@ CUSTOM_MODE = AnalysisMode(
 VDA_19_1_MODE = AnalysisMode(
     key="vda19_1",
     name="VDA 19.1 模式",
-    minimum_size_um=50.0,
+    minimum_size_um=25.0,
     bins=(
+        SizeBin(25.0, 50.0, "–", "25–50 μm（非标准）", (160, 160, 170), "#9ea0a4", True, False),
         SizeBin(50.0, 100.0, "E", "E (50<=n<100)", (90, 133, 47), "#2f855a", True, False),
         SizeBin(100.0, 150.0, "F", "F (100<=n<150)", (108, 149, 76), "#4c956c", True, False),
         SizeBin(150.0, 200.0, "G", "G (150<=n<200)", (139, 154, 108), "#6c9a8b", True, False),
@@ -91,6 +95,7 @@ VDA_19_1_MODE = AnalysisMode(
         SizeBin(3000.0, math.inf, "N", "N (n>=3000)", (139, 52, 61), "#3d348b", True, True),
     ),
     required_pixels=10,
+    resolution_minimum_um=50.0,
 )
 
 

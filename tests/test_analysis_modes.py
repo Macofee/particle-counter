@@ -15,7 +15,9 @@ class AnalysisModeTests(unittest.TestCase):
     def test_vda_mode_uses_lower_inclusive_standard_size_classes(self):
         mode = get_analysis_mode("vda19_1")
 
-        self.assertEqual(mode.minimum_size_um, 50.0)
+        self.assertEqual(mode.minimum_size_um, 25.0)
+        self.assertEqual(mode.classify(25.0).code, "–")
+        self.assertEqual(mode.classify(49.99).code, "–")
         self.assertEqual(mode.classify(50.0).code, "E")
         self.assertEqual(mode.classify(99.99).code, "E")
         self.assertEqual(mode.classify(100.0).code, "F")
