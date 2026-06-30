@@ -31,7 +31,7 @@ BIN_DISPLAY = tuple(
     )
 )
 
-ALGORITHM_VERSION = "2.2.0"
+ALGORITHM_VERSION = "2.3.0"
 
 # Yellow scale-gap detection thresholds — tuned for the standard yellow
 # double-stroke printed in the lower-right corner of microscope images.
