@@ -36,7 +36,10 @@ class AnalysisMode:
         raise ValueError(f"颗粒尺寸 {length_um:.2f} μm 不在 {self.name} 的任何分档范围内。")
 
     def should_report(self, length_um: float, configured_minimum_um: float | None = None) -> bool:
-        minimum = max(self.minimum_size_um, configured_minimum_um or self.minimum_size_um)
+        minimum = max(
+            self.minimum_size_um,
+            configured_minimum_um if configured_minimum_um is not None else self.minimum_size_um,
+        )
         if length_um != minimum:
             return length_um > minimum
         first_bin = self.bins[0]
