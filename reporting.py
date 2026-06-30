@@ -72,6 +72,9 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
     draw.text((90, 365), "检测结果", font=heading_font, fill=navy)
     draw.line((90, 405, 1150, 405), fill=line, width=2)
     cards = [*result["bins"], {"label": "合计", "count": result["total"], "color": blue}]
+    fiber_count = result.get("fiber_count", 0)
+    if fiber_count:
+        cards.append({"label": "纤维", "count": fiber_count, "color": "#00b4d8"})
     columns = 6 if len(cards) > 5 else 5
     gap = 12
     card_width = int((1060 - gap * (columns - 1)) / columns)
@@ -82,7 +85,8 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
         row = index // columns
         x = 90 + col * (card_width + gap)
         y = 430 + row * (card_height + gap)
-        fill = "#eef4f6" if bin_item["label"] == "合计" else "white"
+        is_fiber = bin_item["label"] == "纤维"
+        fill = "#eef4f6" if bin_item["label"] == "合计" else ("#f0fafc" if is_fiber else "white")
         draw.rectangle((x, y, x + card_width, y + card_height), fill=fill, outline=bin_item["color"], width=4)
         draw.text((x + 10, y + 12), bin_item["label"], font=small_font, fill=muted)
         draw.text((x + 10, y + 47), str(bin_item["count"]), font=count_font, fill=navy)
