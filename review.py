@@ -54,6 +54,8 @@ def _manual_particle(
         "center_y_px": int(round(y)),
         "length_px": round(length_px, 3),
         "length_um": round(length_um, 2),
+        "width_px": round(length_px, 3),
+        "width_um": round(length_um, 2),
         "pixel_area": int(round(math.pi * radius * radius)),
         "bin": size_bin.label,
         "contour_px": contour.tolist(),

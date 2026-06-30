@@ -219,6 +219,44 @@ def _maximum_feret_diameter(contour: np.ndarray) -> float:
     return math.sqrt(largest_squared) + 1.0
 
 
+def _minimum_feret_diameter(contour: np.ndarray) -> float:
+    """Measure the smallest distance between parallel supporting lines of a
+    contour's convex hull — the Feret-min / particle width defined in VDA 19.1
+    §8.2.2 Figure 8-8."""
+    hull = cv2.convexHull(contour, returnPoints=True).reshape(-1, 2).astype(np.float64)
+    if len(hull) <= 2:
+        # A point or a line segment has negligible orthogonal extent.
+        return 1.0
+
+    min_width = float("inf")
+    opposite = 1
+    for index in range(len(hull)):
+        next_index = (index + 1) % len(hull)
+        edge = hull[next_index] - hull[index]
+        edge_len_sq = float(edge[0] * edge[0] + edge[1] * edge[1])
+        if edge_len_sq < 1e-12:
+            continue
+
+        def area_twice(point_index: int) -> float:
+            offset = hull[point_index] - hull[index]
+            return abs(float(edge[0] * offset[1] - edge[1] * offset[0]))
+
+        while area_twice((opposite + 1) % len(hull)) > area_twice(opposite) + 1e-9:
+            opposite = (opposite + 1) % len(hull)
+
+        # Perpendicular distance from antipodal point to the edge line.
+        candidates = {opposite}
+        next_opposite = (opposite + 1) % len(hull)
+        if abs(area_twice(next_opposite) - area_twice(opposite)) <= 1e-9:
+            candidates.add(next_opposite)
+        for candidate in candidates:
+            width = area_twice(candidate) / math.sqrt(edge_len_sq)
+            min_width = min(min_width, width)
+
+    # Same pixel-extent convention as _maximum_feret_diameter.
+    return max(1.0, min_width + 1.0)
+
+
 def _read_and_normalize(image_path: Path) -> np.ndarray:
     """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。
 
@@ -351,6 +389,8 @@ def _write_result_files(
                     "center_y_px",
                     "length_px",
                     "length_um",
+                    "width_px",
+                    "width_um",
                     "pixel_area",
                     "bin",
                 ],
@@ -368,6 +408,8 @@ def _write_result_files(
                         "center_y_px": record["center_y_px"],
                         "length_px": record["length_px"],
                         "length_um": record["length_um"],
+                        "width_px": record.get("width_px", ""),
+                        "width_um": record.get("width_um", ""),
                         "pixel_area": record["pixel_area"],
                         "bin": record["bin"],
                     }
@@ -493,6 +535,8 @@ def analyze_image(
         contour = max(contours, key=lambda item: cv2.arcLength(item, False))
         length_px = _maximum_feret_diameter(contour)
         length_um = length_px * um_per_px
+        width_px = _minimum_feret_diameter(contour)
+        width_um = width_px * um_per_px
         if not mode.should_report(length_um, settings.min_size_um):
             continue
 
@@ -512,6 +556,8 @@ def analyze_image(
                 "center_y_px": int(round(centroids[label_id][1])) + y0,
                 "length_px": float(round(length_px, 3)),
                 "length_um": float(round(length_um, 2)),
+                "width_px": float(round(width_px, 3)),
+                "width_um": float(round(width_um, 2)),
                 "pixel_area": int(pixel_area),
                 "bin": size_bin.label,
                 "contour_px": contour_full.reshape(-1, 2).tolist(),
