@@ -13,25 +13,25 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from analysis_modes import CUSTOM_MODE, AnalysisMode, get_analysis_mode
 from reporting import write_pdf_report
 
 
-BIN_DEFINITIONS = (
-    (25.0, 50.0, "25<n<=50", (35, 181, 106)),
-    (50.0, 100.0, "50<n<=100", (25, 158, 234)),
-    (100.0, 200.0, "100<n<=200", (42, 54, 222)),
-    (200.0, math.inf, "n>200", (180, 51, 170)),
+BIN_DEFINITIONS = tuple(
+    (item.low_um, item.high_um, item.label, item.color_bgr)
+    for item in CUSTOM_MODE.bins
 )
 
 # 前端分桶展示信息 — 与 BIN_DEFINITIONS 一一对应
-BIN_DISPLAY = (
-    {"label": "25–50 μm", "color": "#36a673"},
-    {"label": "50–100 μm", "color": "#f0ad35"},
-    {"label": "100–200 μm", "color": "#d93e47"},
-    {"label": "＞200 μm", "color": "#aa33b4"},
+BIN_DISPLAY = tuple(
+    {"label": label, "color": item.color_hex, "code": item.code}
+    for label, item in zip(
+        ("25–50 μm", "50–100 μm", "100–200 μm", "＞200 μm"),
+        CUSTOM_MODE.bins,
+    )
 )
 
-ALGORITHM_VERSION = "2.0.0"
+ALGORITHM_VERSION = "2.2.0"
 
 # Yellow scale-gap detection thresholds — tuned for the standard yellow
 # double-stroke printed in the lower-right corner of microscope images.
@@ -69,6 +69,7 @@ _PREVIEW_MAX_DIM = 1900.0
 
 @dataclass
 class AnalysisSettings:
+    analysis_mode: str = "custom"
     scale_um: float = 500.0
     scale_px: Optional[float] = None
     center_x: float = 0.49
@@ -92,7 +93,7 @@ def _runs(values: np.ndarray) -> list[tuple[int, int]]:
 
 
 def detect_yellow_scale_gap(image: np.ndarray) -> tuple[float, dict]:
-    """Return center-to-center spacing of the two yellow scale strokes."""
+    """Return outer-edge spacing of the two yellow scale strokes."""
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     yellow = cv2.inRange(
@@ -125,7 +126,9 @@ def detect_yellow_scale_gap(image: np.ndarray) -> tuple[float, dict]:
         left, right = column_runs[-2], column_runs[-1]
         left_center = x + (left[0] + left[1]) / 2.0
         right_center = x + (right[0] + right[1]) / 2.0
-        gap = float(math.floor((right_center - left_center) + 0.5))
+        left_outer = float(x + left[0])
+        right_outer = float(x + right[1])
+        gap = float(math.floor((right_outer - left_outer) + 0.5))
         if _YELLOW_MIN_GAP_PX <= gap <= width * _YELLOW_MAX_GAP_FRAC:
             score = area + x + y
             candidates.append(
@@ -133,22 +136,49 @@ def detect_yellow_scale_gap(image: np.ndarray) -> tuple[float, dict]:
                     int(score),
                     float(gap),
                     (float(left_center), float(right_center)),
+                    (left_outer, right_outer),
                     (int(x), int(y), int(w), int(h)),
                 )
             )
 
     if not candidates:
-        raise ValueError("未识别到右下角黄色比例尺，请手动填写两条黄线的像素间距。")
+        raise ValueError("未识别到右下角黄色比例尺，请手动填写两条黄线的外侧边缘间距。")
 
-    _, gap, centers, bbox = max(candidates, key=lambda item: item[0])
-    return float(gap), {"line_centers_px": centers, "component_bbox": bbox}
+    _, gap, centers, outer_edges, bbox = max(candidates, key=lambda item: item[0])
+    return float(gap), {
+        "measurement": "outer_edges",
+        "outer_edges_px": outer_edges,
+        "line_centers_px": centers,
+        "component_bbox": bbox,
+    }
 
 
 def _bin_index(length_um: float) -> int:
-    for index, (low, high, _, _) in enumerate(BIN_DEFINITIONS):
-        if low < length_um <= high:
-            return index
-    raise ValueError(f"颗粒尺寸 {length_um:.2f} μm 不在任何分桶范围，请检查 min_size_um 设置。")
+    size_bin = CUSTOM_MODE.classify(length_um)
+    return CUSTOM_MODE.bins.index(size_bin)
+
+
+def _display_label(mode: AnalysisMode, index: int) -> str:
+    size_bin = mode.bins[index]
+    if mode.key == "custom":
+        return BIN_DISPLAY[index]["label"]
+    if math.isinf(size_bin.high_um):
+        range_label = f"≥{size_bin.low_um:g} μm"
+    else:
+        range_label = f"{size_bin.low_um:g}–{size_bin.high_um:g} μm"
+    return f"{size_bin.code} · {range_label}"
+
+
+def _display_bins(mode: AnalysisMode, counts: list[int]) -> list[dict]:
+    return [
+        {
+            "code": size_bin.code,
+            "label": _display_label(mode, index),
+            "color": size_bin.color_hex,
+            "count": count,
+        }
+        for index, (size_bin, count) in enumerate(zip(mode.bins, counts))
+    ]
 
 
 def _maximum_feret_diameter(contour: np.ndarray) -> float:
@@ -187,6 +217,97 @@ def _maximum_feret_diameter(contour: np.ndarray) -> float:
     # Contour coordinates describe pixel centers. The extra pixel preserves
     # the previous pixel-extent convention used by the classification model.
     return math.sqrt(largest_squared) + 1.0
+
+
+def _minimum_feret_diameter(contour: np.ndarray) -> float:
+    """Measure the smallest distance between parallel supporting lines of a
+    contour's convex hull — the Feret-min / particle width defined in VDA 19.1
+    §8.2.2 Figure 8-8."""
+    hull = cv2.convexHull(contour, returnPoints=True).reshape(-1, 2).astype(np.float64)
+    if len(hull) <= 2:
+        # A point or a line segment has negligible orthogonal extent.
+        return 1.0
+
+    min_width = float("inf")
+    opposite = 1
+    for index in range(len(hull)):
+        next_index = (index + 1) % len(hull)
+        edge = hull[next_index] - hull[index]
+        edge_len_sq = float(edge[0] * edge[0] + edge[1] * edge[1])
+        if edge_len_sq < 1e-12:
+            continue
+
+        def area_twice(point_index: int) -> float:
+            offset = hull[point_index] - hull[index]
+            return abs(float(edge[0] * offset[1] - edge[1] * offset[0]))
+
+        while area_twice((opposite + 1) % len(hull)) > area_twice(opposite) + 1e-9:
+            opposite = (opposite + 1) % len(hull)
+
+        # Perpendicular distance from antipodal point to the edge line.
+        candidates = {opposite}
+        next_opposite = (opposite + 1) % len(hull)
+        if abs(area_twice(next_opposite) - area_twice(opposite)) <= 1e-9:
+            candidates.add(next_opposite)
+        for candidate in candidates:
+            width = area_twice(candidate) / math.sqrt(edge_len_sq)
+            min_width = min(min_width, width)
+
+    # Same pixel-extent convention as _maximum_feret_diameter.
+    return max(1.0, min_width + 1.0)
+
+
+def _max_inscribed_circle_diameter(mask: np.ndarray) -> float:
+    """Diameter of the largest circle that fits entirely inside the particle.
+
+    Uses Euclidean distance transform (L2 norm) so the result is rotation-
+    invariant — the max distance from any foreground pixel to the background
+    equals the inscribed circle radius.  A 1-pixel zero border is added so
+    that particles that touch the bounding-box edges are measured correctly.
+    VDA 19.1 §8.2.2 calls this the "maximum inscribed circle" and uses it
+    as the particle width for fiber classification.
+    """
+    padded = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    dist = cv2.distanceTransform(padded, cv2.DIST_L2, 3)
+    return float(dist.max() * 2)
+
+
+def _stretched_length(mask: np.ndarray) -> float:
+    """Approximate the stretched (skeleton) length of a particle.
+
+    VDA 19.1 §8.2.2 prescribes stretched length for fibres because curled or
+    wavy shapes can make Feret-max unreliable.  For thin elongated particles
+    whose perimeter is dominated by the two long sides, half the perimeter
+    approximates the medial-axis length faithfully while being simple and
+    deterministic.
+    """
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 1.0
+    perimeter = cv2.arcLength(max(contours, key=lambda c: cv2.arcLength(c, False)), closed=True)
+    return perimeter / 2.0
+
+
+def _classify_as_fiber(particle_mask: np.ndarray, um_per_px: float) -> tuple[bool, dict]:
+    """Return (is_fiber, metrics) for a single particle mask.
+
+    VDA 19.1 §8.2.2 geometric criteria:
+      - max inscribed circle diameter (width) ≤ 50 μm
+      - stretched-length / max-inscribed-circle-diameter > 20
+    """
+    inscribed_diameter_px = _max_inscribed_circle_diameter(particle_mask)
+    inscribed_diameter_um = inscribed_diameter_px * um_per_px
+    if inscribed_diameter_um > 50.0 or inscribed_diameter_px < 0.5:
+        return False, {"fiber_width_um": float(round(inscribed_diameter_um, 2))}
+
+    stretched_px = _stretched_length(particle_mask)
+    ratio = stretched_px / inscribed_diameter_px if inscribed_diameter_px > 0 else 0.0
+    is_fiber = ratio > 20.0
+    return is_fiber, {
+        "fiber_ratio": float(round(ratio, 2)),
+        "fiber_width_um": float(round(inscribed_diameter_um, 2)),
+        "fiber_stretched_px": float(round(stretched_px, 3)),
+    }
 
 
 def _read_and_normalize(image_path: Path) -> np.ndarray:
@@ -263,6 +384,7 @@ def _write_result_files(
     metadata_path = result_dir / "analysis.json"
     bundle_path = result_dir / "result_bundle.zip"
     report_path = result_dir / "report.pdf"
+    mode = get_analysis_mode(settings.analysis_mode)
 
     try:
         _checked_imwrite(
@@ -292,11 +414,24 @@ def _write_result_files(
         with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
             writer = csv.writer(file)
             writer.writerow(["颗粒规格_um（最大长度）", "数量"])
-            for count, (_, _, label, _) in zip(counts, BIN_DEFINITIONS):
-                writer.writerow([label, count])
+            for count, size_bin in zip(counts, mode.bins):
+                writer.writerow([size_bin.label, count])
+            fiber_count = result.get("fiber_count", 0)
+            if fiber_count:
+                writer.writerow(["纤维（不计入尺寸分档）", fiber_count])
             writer.writerow(["合计", sum(counts)])
             writer.writerow([])
+            writer.writerow(["分析模式", mode.name])
             writer.writerow(["比例换算", f"{scale_px:.2f} px = {settings.scale_um:g} um"])
+            resolution = result.get("resolution_check", {})
+            if mode.required_pixels is not None:
+                writer.writerow(
+                    [
+                        "分辨率检查",
+                        f"{mode.minimum_size_um:g} um = {resolution.get('minimum_particle_pixels')} px; "
+                        f"要求 >= {mode.required_pixels} px; 通过",
+                    ]
+                )
             writer.writerow(["识别参数", f"边缘={settings.edge_threshold}; 深色核心={settings.seed_threshold}"])
 
         with measurements_path.open("w", newline="", encoding="utf-8-sig") as file:
@@ -305,11 +440,14 @@ def _write_result_files(
                 fieldnames=[
                     "编号",
                     "particle_id",
+                    "class",
                     "source",
                     "center_x_px",
                     "center_y_px",
                     "length_px",
                     "length_um",
+                    "width_px",
+                    "width_um",
                     "pixel_area",
                     "bin",
                 ],
@@ -322,11 +460,14 @@ def _write_result_files(
                     {
                         "编号": index,
                         "particle_id": record["id"],
+                        "class": record.get("class", "particle"),
                         "source": record["source"],
                         "center_x_px": record["center_x_px"],
                         "center_y_px": record["center_y_px"],
                         "length_px": record["length_px"],
                         "length_um": record["length_um"],
+                        "width_px": record.get("width_px", ""),
+                        "width_um": record.get("width_um", ""),
                         "pixel_area": record["pixel_area"],
                         "bin": record["bin"],
                     }
@@ -375,6 +516,7 @@ def analyze_image(
     settings: AnalysisSettings,
     sample_metadata: Optional[dict] = None,
 ) -> dict:
+    mode = get_analysis_mode(settings.analysis_mode)
     image = _read_and_normalize(image_path)
 
     result_dir.mkdir(parents=True, exist_ok=True)
@@ -387,6 +529,7 @@ def analyze_image(
         scale_px, detected = detect_yellow_scale_gap(image)
         scale_meta = {"source": "auto", **detected}
     um_per_px = settings.scale_um / scale_px
+    resolution_check = mode.validate_resolution(um_per_px)
 
     cx = int(round(settings.center_x * width))
     cy = int(round(settings.center_y * height))
@@ -434,41 +577,60 @@ def analyze_image(
     selected_labels = selected_labels[selected_labels != 0]
 
     records = []
-    counts = [0] * len(BIN_DEFINITIONS)
+    counts = [0] * len(mode.bins)
+    fiber_count = 0
     annotated = image.copy()
 
     for label_id in selected_labels:
         x, y, component_width, component_height, pixel_area = stats[label_id]
-        component = (
+        component_mask = (
             labels[y : y + component_height, x : x + component_width] == label_id
         ).astype(np.uint8)
-        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             continue
         contour = max(contours, key=lambda item: cv2.arcLength(item, False))
         length_px = _maximum_feret_diameter(contour)
         length_um = length_px * um_per_px
-        if length_um <= settings.min_size_um:
+        width_px = _minimum_feret_diameter(contour)
+        width_um = width_px * um_per_px
+        if not mode.should_report(length_um, settings.min_size_um):
             continue
 
-        bin_index = _bin_index(length_um)
-        counts[bin_index] += 1
+        is_fiber, fiber_meta = _classify_as_fiber(component_mask, um_per_px)
+        particle_class = "fiber" if is_fiber else "particle"
+
+        if is_fiber:
+            fiber_count += 1
+        else:
+            size_bin = mode.classify(length_um)
+            bin_index = mode.bins.index(size_bin)
+            counts[bin_index] += 1
+
         contour_full = contour + np.array(
             [[[x + x0, y + y0]]], dtype=np.int32
         )
-        color_bgr = BIN_DEFINITIONS[bin_index][3]
+        if is_fiber:
+            color_bgr = (255, 200, 0)  # cyan fiber outline
+        else:
+            size_bin = mode.classify(length_um)
+            color_bgr = size_bin.color_bgr
         cv2.drawContours(annotated, [contour_full], -1, color_bgr, _CONTOUR_THICKNESS, cv2.LINE_AA)
         records.append(
             {
                 "id": f"auto-{int(label_id)}",
                 "source": "automatic",
+                "class": particle_class,
                 "center_x_px": int(round(centroids[label_id][0])) + x0,
                 "center_y_px": int(round(centroids[label_id][1])) + y0,
                 "length_px": float(round(length_px, 3)),
                 "length_um": float(round(length_um, 2)),
+                "width_px": float(round(width_px, 3)),
+                "width_um": float(round(width_um, 2)),
                 "pixel_area": int(pixel_area),
-                "bin": BIN_DEFINITIONS[bin_index][2],
+                "bin": "纤维" if is_fiber else size_bin.label,
                 "contour_px": contour_full.reshape(-1, 2).tolist(),
+                **fiber_meta,
             }
         )
 
@@ -486,16 +648,25 @@ def analyze_image(
 
     result = {
         "algorithm_version": ALGORITHM_VERSION,
+        "analysis_mode": {"key": mode.key, "name": mode.name},
+        "compliance": {
+            "status": "partial" if mode.key == "vda19_1" else "not_applicable",
+            "notice": (
+                "已启用 VDA 19.1 尺寸分档、分辨率门槛与纤维分类；标准分割配置、"
+                "边缘重构及完整计量追溯尚未完成，不构成完整合规声明。"
+                if mode.key == "vda19_1"
+                else "自定义业务模式，不作为 VDA 19.1 合规声明。"
+            ),
+        },
         "image": {"width": width, "height": height, "name": image_path.name},
         "counts": counts,
-        "bins": [
-            {**display, "count": count}
-            for display, count in zip(BIN_DISPLAY, counts)
-        ],
+        "bins": _display_bins(mode, counts),
         "total": sum(counts),
+        "fiber_count": fiber_count,
         "scale_px": float(round(scale_px, 2)),
         "scale_um": float(settings.scale_um),
         "um_per_px": float(round(um_per_px, 5)),
+        "resolution_check": resolution_check,
         "scale_meta": scale_meta,
         "region": {
             "center_x_px": cx,

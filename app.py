@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 from engine import ALGORITHM_VERSION, AnalysisSettings, analyze_image
 from review import apply_review_action
 
-SOFTWARE_VERSION = "1.0.1"
+SOFTWARE_VERSION = "1.1.0"
 
 ROOT = Path(__file__).resolve().parent
 STATIC = Path(getattr(sys, "_MEIPASS", ROOT)) / "static"
@@ -208,6 +208,7 @@ class Handler(BaseHTTPRequestHandler):
 
             scale_px = number("scale_px", 0)
             settings = AnalysisSettings(
+                analysis_mode=fields.get("analysis_mode", "custom").strip() or "custom",
                 scale_um=number("scale_um", 500),
                 scale_px=scale_px if scale_px > 0 else None,
                 center_x=number("center_x", 49) / 100.0,
@@ -221,7 +222,7 @@ class Handler(BaseHTTPRequestHandler):
             if not (0 < settings.scale_um < 100000):
                 raise ValueError("比例尺长度不合理。")
             if settings.scale_px is not None and not (1 <= settings.scale_px <= 100000):
-                raise ValueError("黄线间距不合理。")
+                raise ValueError("黄线外侧边缘间距不合理。")
             if not (0 < settings.center_x < 1 and 0 < settings.center_y < 1):
                 raise ValueError("统计区域中心必须位于图片内。")
             if not (0.01 <= settings.radius_x <= 0.5 and 0.01 <= settings.radius_y <= 0.5):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import textwrap
 from datetime import datetime
 from pathlib import Path
 
@@ -69,26 +71,41 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
 
     draw.text((90, 365), "检测结果", font=heading_font, fill=navy)
     draw.line((90, 405, 1150, 405), fill=line, width=2)
-    card_width = 210
-    for index, bin_item in enumerate(result["bins"]):
-        x = 90 + index * (card_width + 18)
-        draw.rectangle((x, 430, x + card_width, 545), outline=bin_item["color"], width=4)
-        draw.text((x + 14, 446), bin_item["label"], font=small_font, fill=muted)
-        draw.text((x + 14, 480), str(bin_item["count"]), font=count_font, fill=navy)
-    draw.rectangle((1002, 430, 1150, 545), fill="#eef4f6", outline=blue, width=4)
-    draw.text((1018, 446), "合计", font=small_font, fill=muted)
-    draw.text((1018, 480), str(result["total"]), font=count_font, fill=navy)
+    cards = [*result["bins"], {"label": "合计", "count": result["total"], "color": blue}]
+    fiber_count = result.get("fiber_count", 0)
+    if fiber_count:
+        cards.append({"label": "纤维", "count": fiber_count, "color": "#00b4d8"})
+    columns = 6 if len(cards) > 5 else 5
+    gap = 12
+    card_width = int((1060 - gap * (columns - 1)) / columns)
+    card_height = 102
+    rows = math.ceil(len(cards) / columns)
+    for index, bin_item in enumerate(cards):
+        col = index % columns
+        row = index // columns
+        x = 90 + col * (card_width + gap)
+        y = 430 + row * (card_height + gap)
+        is_fiber = bin_item["label"] == "纤维"
+        fill = "#eef4f6" if bin_item["label"] == "合计" else ("#f0fafc" if is_fiber else "white")
+        draw.rectangle((x, y, x + card_width, y + card_height), fill=fill, outline=bin_item["color"], width=4)
+        draw.text((x + 10, y + 12), bin_item["label"], font=small_font, fill=muted)
+        draw.text((x + 10, y + 47), str(bin_item["count"]), font=count_font, fill=navy)
 
     rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
     image = Image.fromarray(rgb)
-    image.thumbnail((1060, 680), Image.Resampling.LANCZOS)
+    image_box_top = 430 + rows * (card_height + gap) + 24
+    image_box_bottom = 1280
+    image_box_height = image_box_bottom - image_box_top
+    image.thumbnail((1060, image_box_height), Image.Resampling.LANCZOS)
     image_x = 90 + (1060 - image.width) // 2
-    image_y = 600 + (680 - image.height) // 2
+    image_y = image_box_top + (image_box_height - image.height) // 2
     page.paste(image, (image_x, image_y))
-    draw.rectangle((90, 600, 1150, 1280), outline=line, width=2)
+    draw.rectangle((90, image_box_top, 1150, image_box_bottom), outline=line, width=2)
 
     draw.text((90, 1325), "校准与追溯", font=heading_font, fill=navy)
+    mode = result.get("analysis_mode", {"name": "自定义模式"})
     calibration = (
+        f"分析模式：{mode.get('name', '自定义模式')}；"
         f"比例换算：{result['scale_px']} px = {result['scale_um']} μm；"
         f"1 px = {result['um_per_px']} μm"
     )
@@ -108,6 +125,10 @@ def write_pdf_report(path: Path, result: dict, annotated_bgr) -> None:
     draw.text((90, 1450), f"原图 SHA-256：{source.get('sha256', '未记录')}", font=small_font, fill=muted)
     notes = str(sample.get("notes") or "无")[:120]
     draw.text((90, 1500), f"备注：{notes}", font=body_font, fill=navy)
+    compliance_notice = str(result.get("compliance", {}).get("notice") or "")[:100]
+    if compliance_notice:
+        for line_index, notice_line in enumerate(textwrap.wrap(compliance_notice, width=52)[:2]):
+            draw.text((90, 1540 + line_index * 22), notice_line, font=small_font, fill=muted)
     draw.line((90, 1605, 1150, 1605), fill=line, width=2)
     draw.text(
         (90, 1630),

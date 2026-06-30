@@ -10,7 +10,7 @@ from review import apply_review_action
 
 
 class ReviewWorkflowTests(unittest.TestCase):
-    def _analyzed_result(self, root: Path) -> tuple[Path, dict]:
+    def _analyzed_result(self, root: Path, analysis_mode: str = "custom") -> tuple[Path, dict]:
         image = np.full((400, 400, 3), 185, dtype=np.uint8)
         cv2.circle(image, (200, 200), 12, (25, 25, 25), cv2.FILLED)
         image_path = root / "source.png"
@@ -20,6 +20,7 @@ class ReviewWorkflowTests(unittest.TestCase):
             image_path,
             result_dir,
             AnalysisSettings(
+                analysis_mode=analysis_mode,
                 scale_um=500,
                 scale_px=100,
                 center_x=0.5,
@@ -31,6 +32,31 @@ class ReviewWorkflowTests(unittest.TestCase):
         )
         self.assertGreaterEqual(result["total"], 1)
         return result_dir, result
+
+    def test_vda_review_keeps_standard_classification(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_dir, original = self._analyzed_result(Path(tmpdir), "vda19_1")
+            particle_id = original["particles"][0]["id"]
+
+            reviewed = apply_review_action(
+                result_dir,
+                {"type": "remove", "particle_id": particle_id},
+                "vda-operator",
+            )
+
+            self.assertEqual(reviewed["total"], original["total"] - 1)
+            self.assertEqual([item["code"] for item in reviewed["bins"]], list("–EFGHIJKLMN"))
+
+    def test_vda_review_rejects_typed_manual_particle_sizes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_dir, _ = self._analyzed_result(Path(tmpdir), "vda19_1")
+
+            with self.assertRaisesRegex(ValueError, "真实轮廓"):
+                apply_review_action(
+                    result_dir,
+                    {"type": "add", "x_px": 130, "y_px": 150, "length_um": 100},
+                    "vda-operator",
+                )
 
     def test_remove_and_undo_rebuilds_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:

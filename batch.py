@@ -9,6 +9,7 @@ from dataclasses import fields
 from datetime import date
 from pathlib import Path
 
+from analysis_modes import get_analysis_mode
 from engine import ALGORITHM_VERSION, AnalysisSettings, analyze_image
 
 
@@ -34,6 +35,7 @@ def run_batch(
     operator: str = "",
     inspection_date: str = "",
 ) -> dict:
+    mode = get_analysis_mode(settings.analysis_mode)
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
     if not input_dir.is_dir():
@@ -81,9 +83,11 @@ def run_batch(
     summary_path = output_dir / "batch_summary.csv"
     with summary_path.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.writer(file)
-        writer.writerow(["文件", "状态", "25<n<=50", "50<n<=100", "100<n<=200", "n>200", "合计", "比例尺_px", "错误"])
+        writer.writerow(
+            ["文件", "状态", *[item.label for item in mode.bins], "合计", "比例尺_px", "错误"]
+        )
         for item in items:
-            counts = item.get("counts", ["", "", "", ""])
+            counts = item.get("counts", [""] * len(mode.bins))
             writer.writerow(
                 [
                     item["name"],
@@ -97,6 +101,7 @@ def run_batch(
 
     report = {
         "algorithm_version": ALGORITHM_VERSION,
+        "analysis_mode": {"key": mode.key, "name": mode.name},
         "batch_id": batch_id,
         "operator": operator,
         "inspection_date": inspection_date,

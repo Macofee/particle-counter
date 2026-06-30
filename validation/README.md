@@ -6,7 +6,7 @@
 
 1. 选择覆盖不同滤膜、相机、污染程度和临界尺寸的原图。
 2. 由检测人员确认每颗颗粒的中心、最大 Feret 径和所属分档。
-3. 复制 `manifest.example.json`，填写图片路径、真值和项目验收门槛。
+3. 复制 `manifest.example.json`，在每个用例的 `settings.analysis_mode` 中选择 `custom` 或 `vda19_1`，并填写图片路径、真值和项目验收门槛。
 4. 运行：
 
 ```bash
@@ -16,3 +16,11 @@ python3 validation.py validation/manifest.json --output validation-report.json
 退出码：`0` 表示全部通过，`1` 表示指标未达标，`2` 表示清单或运行错误。
 
 原始图片可以放在仓库外，清单中的 `image` 路径相对于清单文件。若图片包含客户或生产信息，不要提交到 Git。
+
+## 标定与模式注意事项
+
+- 自动比例尺真值采用两条黄色竖线最外侧边缘之间的像素距离，不是中心距。
+- 自定义模式的 `expected.counts` 固定为 4 个分档。
+- VDA 19.1 模式的 `expected.counts` 按 E–N 顺序填写 10 个分档。
+- VDA 用例必须保证 50 μm 至少覆盖 10 像素；分辨率不足时用例会在分析阶段失败。
+- 同一张图片不要混用中心距与外侧距真值，否则比例尺误差和颗粒尺寸会整体偏移。

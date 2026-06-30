@@ -16,11 +16,12 @@ const BIN_CLASS_MAP = {
 
 function renderBins(bins) {
   const rail = $('#binRail');
-  // 移除旧的分桶卡片，保留合计行
-  rail.querySelectorAll('.bin:not(.total)').forEach((el) => el.remove());
+  // 移除旧的分桶卡片，保留合计行和纤维行
+  rail.querySelectorAll('.bin:not(.total):not(.fiber)').forEach((el) => el.remove());
   bins.forEach((bin) => {
     const card = document.createElement('article');
     card.className = `bin ${BIN_CLASS_MAP[bin.color] || ''}`;
+    card.style.color = bin.color;
     const label = document.createElement('span');
     label.textContent = bin.label;
     const value = document.createElement('strong');
@@ -31,17 +32,26 @@ function renderBins(bins) {
 
   // 动态渲染图例（保留统计边界标识）
   const legend = $('#legend');
-  legend.querySelectorAll('span:not(.boundary)').forEach((el) => el.remove());
-  // 标记统计边界为 boundary 类以便保留
-  const boundary = legend.querySelector('span');
+  // 旧页面标记没有 boundary 类，先识别并保留统计边界，再清理动态图例。
+  const boundary = legend.querySelector('.boundary') || legend.querySelector('span');
   if (boundary) boundary.classList.add('boundary');
+  legend.querySelectorAll('span:not(.boundary)').forEach((el) => el.remove());
   bins.slice().reverse().forEach((bin) => {
     const item = document.createElement('span');
     const swatch = document.createElement('i');
     swatch.className = BIN_CLASS_MAP[bin.color] || '';
+    swatch.style.color = bin.color;
     item.append(swatch, bin.label.replace(' μm', ''));
     legend.insertBefore(item, legend.firstElementChild);
   });
+  // 纤维图例 — 用青色虚线边框区分
+  legend.querySelectorAll('.fiber-legend').forEach((el) => el.remove());
+  const fiberItem = document.createElement('span');
+  fiberItem.className = 'fiber-legend';
+  const fiberSwatch = document.createElement('i');
+  fiberSwatch.className = 'fiber-swatch';
+  fiberItem.append(fiberSwatch, '纤维');
+  legend.insertBefore(fiberItem, legend.firstElementChild);
 }
 
 const imageInput = $('#imageInput');
@@ -128,6 +138,7 @@ stage.addEventListener('wheel', (event) => {
 window.addEventListener('resize', () => applyZoom(false));
 
 const parameterIds = [
+  'analysisMode',
   'scaleUm', 'scalePx', 'centerX', 'centerY', 'radiusX', 'radiusY',
   'edgeThreshold', 'seedThreshold', 'guardUm'
 ];
@@ -195,10 +206,23 @@ function renderResult(data, preserveZoom = false) {
   regionOverlay.classList.add('hidden');
   renderBins(data.bins);
   $('#countTotal').textContent = data.total.toLocaleString('zh-CN');
+  const fiberCount = data.fiber_count || 0;
+  if (fiberCount > 0) {
+    $('#fiberCount').textContent = fiberCount.toLocaleString('zh-CN');
+    $('#fiberRow').classList.remove('hidden');
+  } else {
+    $('#fiberRow').classList.add('hidden');
+  }
   $('#calibrationReadout').replaceChildren(
     createSpan(`${data.scale_px} px = ${data.scale_um} μm`),
     createSpan(`1 px = ${data.um_per_px} μm · 算法 ${data.algorithm_version}`),
   );
+  const mode = data.analysis_mode || { key: 'custom', name: '自定义模式' };
+  const resolution = data.resolution_check || {};
+  $('#resultMode').textContent = mode.key === 'vda19_1'
+    ? `${mode.name} · 50 μm = ${resolution.minimum_particle_pixels} px · 分辨率检查通过`
+    : mode.name;
+  setVdaReviewControls(mode.key === 'vda19_1');
   $('#downloadBundle').href = data.files.bundle;
   $('#downloadAnnotated').href = data.files.annotated;
   $('#downloadSummary').href = data.files.summary;
@@ -329,10 +353,12 @@ function currentParameters() {
 }
 
 function applyParameters(values) {
+  if (!Object.hasOwn(values, 'analysisMode')) $('#analysisMode').value = 'custom';
   parameterIds.forEach((id) => {
     if (Object.hasOwn(values, id)) $(`#${id}`).value = values[id];
   });
   updateRegion();
+  updateModeUi();
   markParametersDirty();
 }
 
@@ -452,6 +478,7 @@ analyzeButton.addEventListener('click', async () => {
 
   const form = new FormData();
   form.append('image', selectedFile);
+  appendField(form, 'analysis_mode', '#analysisMode');
   appendField(form, 'scale_um', '#scaleUm');
   appendField(form, 'scale_px', '#scalePx');
   appendField(form, 'center_x', '#centerX');
@@ -511,5 +538,24 @@ previewImage.addEventListener('load', () => {
 });
 $('#inspectionDate').value = new Date().toISOString().slice(0, 10);
 $('#operatorName').addEventListener('input', () => { $('#reviewActor').value = $('#operatorName').value; });
+
+function setVdaReviewControls(isVda) {
+  ['#addParticle', '#splitParticle', '#manualLength', '#splitLengthA', '#splitLengthB'].forEach((selector) => {
+    $(selector).disabled = isVda;
+  });
+  if (isVda) setReviewMode(null);
+}
+
+function updateModeUi() {
+  const isVda = $('#analysisMode').value === 'vda19_1';
+  $('#modeNotice').textContent = isVda
+    ? '按 E–N 等级统计，50 μm 必须覆盖至少 10 像素。当前为阶段 1，尚不构成完整 VDA 19.1 合规声明。'
+    : '保留现有 25/50/100/200 μm 分档和识别流程。';
+  $('#modeNotice').classList.toggle('vda', isVda);
+  setVdaReviewControls(isVda);
+}
+
+$('#analysisMode').addEventListener('change', updateModeUi);
 renderTemplates();
+updateModeUi();
 updateRegion();

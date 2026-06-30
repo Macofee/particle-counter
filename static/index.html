@@ -47,6 +47,20 @@
 
       <section class="panel-section">
         <div class="section-heading">
+          <span class="step">模式</span>
+          <h2>分析规范</h2>
+        </div>
+        <label class="full-field">分析模式
+          <select id="analysisMode">
+            <option value="custom">自定义模式（现有规则）</option>
+            <option value="vda19_1">VDA 19.1 模式（阶段 1）</option>
+          </select>
+        </label>
+        <div class="mode-notice" id="modeNotice" role="status"></div>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading">
           <span class="step">模板</span>
           <h2>相机与滤膜参数</h2>
         </div>
@@ -71,9 +85,9 @@
         </div>
         <div class="field-grid two">
           <label>标注长度 <span>μm</span><input id="scaleUm" type="number" value="500" min="1"></label>
-          <label>黄线间距 <span>px</span><input id="scalePx" type="number" placeholder="留空自动识别" min="0" step="0.1"></label>
+          <label>黄线外侧距 <span>px</span><input id="scalePx" type="number" placeholder="留空自动识别" min="0" step="0.1"></label>
         </div>
-        <p class="hint">留空像素间距时，软件自动读取右下角两条黄色竖线的中心距。</p>
+        <p class="hint">留空像素间距时，软件自动读取右下角两条黄色竖线最外侧边缘的距离。</p>
       </section>
 
       <section class="panel-section">
@@ -137,9 +151,11 @@
           </div>
           <div class="calibration-readout" id="calibrationReadout"></div>
         </div>
+        <div class="result-mode" id="resultMode"></div>
 
         <div class="bin-rail" id="binRail">
           <article class="bin total"><span>合计</span><strong id="countTotal">0</strong></article>
+          <article class="bin fiber hidden" id="fiberRow"><span>纤维</span><strong id="fiberCount">0</strong></article>
         </div>
 
         <section class="review-panel" id="reviewPanel">

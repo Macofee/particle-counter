@@ -13,6 +13,7 @@
       "id": "sample-001",
       "image": "images/sample-001.png",
       "settings": {
+        "analysis_mode": "custom",
         "scale_um": 500,
         "scale_px": null,
         "center_x": 0.49,
