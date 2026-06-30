@@ -50,6 +50,7 @@ def _manual_particle(
     return {
         "id": f"manual-{uuid.uuid4().hex}",
         "source": "manual",
+        "class": "particle",
         "center_x_px": int(round(x)),
         "center_y_px": int(round(y)),
         "length_px": round(length_px, 3),
@@ -97,7 +98,11 @@ def _render_annotated(source: np.ndarray, result: dict, mode: AnalysisMode) -> n
 def _recount(result: dict, mode: AnalysisMode) -> list[int]:
     labels = [size_bin.label for size_bin in mode.bins]
     counts = [0] * len(labels)
+    fiber_count = 0
     for particle in result["particles"]:
+        if particle.get("class") == "fiber":
+            fiber_count += 1
+            continue
         try:
             counts[labels.index(particle["bin"])] += 1
         except ValueError as error:
@@ -105,6 +110,7 @@ def _recount(result: dict, mode: AnalysisMode) -> list[int]:
     result["counts"] = counts
     result["bins"] = _display_bins(mode, counts)
     result["total"] = sum(counts)
+    result["fiber_count"] = fiber_count
     return counts
 
 

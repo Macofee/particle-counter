@@ -257,6 +257,59 @@ def _minimum_feret_diameter(contour: np.ndarray) -> float:
     return max(1.0, min_width + 1.0)
 
 
+def _max_inscribed_circle_diameter(mask: np.ndarray) -> float:
+    """Diameter of the largest circle that fits entirely inside the particle.
+
+    Uses Euclidean distance transform (L2 norm) so the result is rotation-
+    invariant — the max distance from any foreground pixel to the background
+    equals the inscribed circle radius.  A 1-pixel zero border is added so
+    that particles that touch the bounding-box edges are measured correctly.
+    VDA 19.1 §8.2.2 calls this the "maximum inscribed circle" and uses it
+    as the particle width for fiber classification.
+    """
+    padded = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    dist = cv2.distanceTransform(padded, cv2.DIST_L2, 3)
+    return float(dist.max() * 2)
+
+
+def _stretched_length(mask: np.ndarray) -> float:
+    """Approximate the stretched (skeleton) length of a particle.
+
+    VDA 19.1 §8.2.2 prescribes stretched length for fibres because curled or
+    wavy shapes can make Feret-max unreliable.  For thin elongated particles
+    whose perimeter is dominated by the two long sides, half the perimeter
+    approximates the medial-axis length faithfully while being simple and
+    deterministic.
+    """
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 1.0
+    perimeter = cv2.arcLength(max(contours, key=lambda c: cv2.arcLength(c, False)), closed=True)
+    return perimeter / 2.0
+
+
+def _classify_as_fiber(particle_mask: np.ndarray, um_per_px: float) -> tuple[bool, dict]:
+    """Return (is_fiber, metrics) for a single particle mask.
+
+    VDA 19.1 §8.2.2 geometric criteria:
+      - max inscribed circle diameter (width) ≤ 50 μm
+      - stretched-length / max-inscribed-circle-diameter > 20
+    """
+    inscribed_diameter_px = _max_inscribed_circle_diameter(particle_mask)
+    inscribed_diameter_um = inscribed_diameter_px * um_per_px
+    if inscribed_diameter_um > 50.0 or inscribed_diameter_px < 0.5:
+        return False, {"fiber_width_um": float(round(inscribed_diameter_um, 2))}
+
+    stretched_px = _stretched_length(particle_mask)
+    ratio = stretched_px / inscribed_diameter_px if inscribed_diameter_px > 0 else 0.0
+    is_fiber = ratio > 20.0
+    return is_fiber, {
+        "fiber_ratio": float(round(ratio, 2)),
+        "fiber_width_um": float(round(inscribed_diameter_um, 2)),
+        "fiber_stretched_px": float(round(stretched_px, 3)),
+    }
+
+
 def _read_and_normalize(image_path: Path) -> np.ndarray:
     """读取图片并归一化为 uint8 BGR，兼容 16-bit 与灰度图。
 
@@ -363,6 +416,9 @@ def _write_result_files(
             writer.writerow(["颗粒规格_um（最大长度）", "数量"])
             for count, size_bin in zip(counts, mode.bins):
                 writer.writerow([size_bin.label, count])
+            fiber_count = result.get("fiber_count", 0)
+            if fiber_count:
+                writer.writerow(["纤维（不计入尺寸分档）", fiber_count])
             writer.writerow(["合计", sum(counts)])
             writer.writerow([])
             writer.writerow(["分析模式", mode.name])
@@ -384,6 +440,7 @@ def _write_result_files(
                 fieldnames=[
                     "编号",
                     "particle_id",
+                    "class",
                     "source",
                     "center_x_px",
                     "center_y_px",
@@ -403,6 +460,7 @@ def _write_result_files(
                     {
                         "编号": index,
                         "particle_id": record["id"],
+                        "class": record.get("class", "particle"),
                         "source": record["source"],
                         "center_x_px": record["center_x_px"],
                         "center_y_px": record["center_y_px"],
@@ -522,14 +580,15 @@ def analyze_image(
 
     records = []
     counts = [0] * len(mode.bins)
+    fiber_count = 0
     annotated = image.copy()
 
     for label_id in selected_labels:
         x, y, component_width, component_height, pixel_area = stats[label_id]
-        component = (
+        component_mask = (
             labels[y : y + component_height, x : x + component_width] == label_id
         ).astype(np.uint8)
-        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             continue
         contour = max(contours, key=lambda item: cv2.arcLength(item, False))
@@ -540,18 +599,30 @@ def analyze_image(
         if not mode.should_report(length_um, settings.min_size_um):
             continue
 
-        size_bin = mode.classify(length_um)
-        bin_index = mode.bins.index(size_bin)
-        counts[bin_index] += 1
+        is_fiber, fiber_meta = _classify_as_fiber(component_mask, um_per_px)
+        particle_class = "fiber" if is_fiber else "particle"
+
+        if is_fiber:
+            fiber_count += 1
+        else:
+            size_bin = mode.classify(length_um)
+            bin_index = mode.bins.index(size_bin)
+            counts[bin_index] += 1
+
         contour_full = contour + np.array(
             [[[x + x0, y + y0]]], dtype=np.int32
         )
-        color_bgr = size_bin.color_bgr
+        if is_fiber:
+            color_bgr = (255, 200, 0)  # cyan fiber outline
+        else:
+            size_bin = mode.classify(length_um)
+            color_bgr = size_bin.color_bgr
         cv2.drawContours(annotated, [contour_full], -1, color_bgr, _CONTOUR_THICKNESS, cv2.LINE_AA)
         records.append(
             {
                 "id": f"auto-{int(label_id)}",
                 "source": "automatic",
+                "class": particle_class,
                 "center_x_px": int(round(centroids[label_id][0])) + x0,
                 "center_y_px": int(round(centroids[label_id][1])) + y0,
                 "length_px": float(round(length_px, 3)),
@@ -559,8 +630,9 @@ def analyze_image(
                 "width_px": float(round(width_px, 3)),
                 "width_um": float(round(width_um, 2)),
                 "pixel_area": int(pixel_area),
-                "bin": size_bin.label,
+                "bin": "纤维" if is_fiber else size_bin.label,
                 "contour_px": contour_full.reshape(-1, 2).tolist(),
+                **fiber_meta,
             }
         )
 
@@ -582,8 +654,8 @@ def analyze_image(
         "compliance": {
             "status": "partial" if mode.key == "vda19_1" else "not_applicable",
             "notice": (
-                "已启用 VDA 19.1 尺寸分档与分辨率门槛；纤维识别、标准分割配置、"
-                "边缘重构及计量追溯尚未完成，不构成完整合规声明。"
+                "已启用 VDA 19.1 尺寸分档、分辨率门槛与纤维分类；标准分割配置、"
+                "边缘重构及完整计量追溯尚未完成，不构成完整合规声明。"
                 if mode.key == "vda19_1"
                 else "自定义业务模式，不作为 VDA 19.1 合规声明。"
             ),
@@ -592,6 +664,7 @@ def analyze_image(
         "counts": counts,
         "bins": _display_bins(mode, counts),
         "total": sum(counts),
+        "fiber_count": fiber_count,
         "scale_px": float(round(scale_px, 2)),
         "scale_um": float(settings.scale_um),
         "um_per_px": float(round(um_per_px, 5)),

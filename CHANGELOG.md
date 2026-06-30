@@ -12,6 +12,9 @@
 - 单图、批处理、CSV、JSON 和 PDF 结果记录分析模式与分辨率证据
 - 黄色比例尺改为测量两条竖线最外侧边缘的距离，并在分析元数据中记录外沿坐标
 
+- **纤维自动分类**：实现 VDA 19.1 §8.2.2 纤维识别 — 基于距离变换的最大内切圆直径（≤ 50 μm）和轮廓周长的拉伸长度（ratio > 20）判定；纤维不计入尺寸分档，在 CSV 和 JSON 中独立标记
+- 颗粒记录与 CSV 新增 `class`（particle/fiber）和 `fiber_count` 字段
+
 ### 修复
 
 - **VDA 模式边界处理**：修复 `should_report` 中 `configured_minimum_um=0.0` 因 Python `or` 运算符的 falsy 行为被错误替换为模式默认最小值的问题
