@@ -44,6 +44,14 @@ function renderBins(bins) {
     item.append(swatch, bin.label.replace(' μm', ''));
     legend.insertBefore(item, legend.firstElementChild);
   });
+  // 纤维图例 — 用青色虚线边框区分
+  legend.querySelectorAll('.fiber-legend').forEach((el) => el.remove());
+  const fiberItem = document.createElement('span');
+  fiberItem.className = 'fiber-legend';
+  const fiberSwatch = document.createElement('i');
+  fiberSwatch.className = 'fiber-swatch';
+  fiberItem.append(fiberSwatch, '纤维');
+  legend.insertBefore(fiberItem, legend.firstElementChild);
 }
 
 const imageInput = $('#imageInput');
@@ -198,6 +206,13 @@ function renderResult(data, preserveZoom = false) {
   regionOverlay.classList.add('hidden');
   renderBins(data.bins);
   $('#countTotal').textContent = data.total.toLocaleString('zh-CN');
+  const fiberCount = data.fiber_count || 0;
+  if (fiberCount > 0) {
+    $('#fiberCount').textContent = fiberCount.toLocaleString('zh-CN');
+    $('#fiberRow').classList.remove('hidden');
+  } else {
+    $('#fiberRow').classList.add('hidden');
+  }
   $('#calibrationReadout').replaceChildren(
     createSpan(`${data.scale_px} px = ${data.scale_um} μm`),
     createSpan(`1 px = ${data.um_per_px} μm · 算法 ${data.algorithm_version}`),

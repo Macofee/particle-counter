@@ -225,6 +225,10 @@ input[type="range"] { grid-column: 1 / -1; accent-color: var(--blue); width: 100
 .bin span { display: block; color: var(--muted); font: 11px monospace; }
 .bin strong { display: block; margin-top: 5px; color: var(--ink); font: 700 28px/1 "SFMono-Regular", monospace; }
 .bin.green { color: var(--green); }.bin.amber { color: var(--amber); }.bin.red { color: var(--red); }.bin.violet { color: var(--violet); }.bin.total { color: var(--blue); background: #eef4f6; }
+.bin.fiber { color: #00b4d8; }
+.bin.fiber::before { background: #00b4d8; }
+.fiber-swatch { display: inline-block; width: 15px; height: 4px; border: 1.5px dashed #00b4d8; background: transparent; vertical-align: middle; margin-right: 4px; }
+.fiber-legend { color: #00b4d8; font-size: 12px; }
 .review-panel { margin-top: 18px; padding: 16px; border: 1px solid var(--line); background: #f2f6f7; }
 .review-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
 .review-heading h3 { margin: 4px 0 0; font-size: 15px; }

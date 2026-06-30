@@ -66,20 +66,18 @@ def _manual_particle(
 def _render_annotated(source: np.ndarray, result: dict, mode: AnalysisMode) -> np.ndarray:
     annotated = source.copy()
     labels = [size_bin.label for size_bin in mode.bins]
+    FIBER_COLOR_BGR = (200, 230, 50)  # cyan for fibre outlines
     for particle in result["particles"]:
-        try:
-            bin_index = labels.index(particle["bin"])
-        except ValueError as error:
-            raise ValueError(f"未知颗粒分档：{particle['bin']}") from error
+        if particle.get("class") == "fiber":
+            color_bgr = FIBER_COLOR_BGR
+        else:
+            try:
+                bin_index = labels.index(particle["bin"])
+            except ValueError as error:
+                raise ValueError(f"未知颗粒分档：{particle['bin']}") from error
+            color_bgr = mode.bins[bin_index].color_bgr
         contour = np.asarray(particle["contour_px"], dtype=np.int32).reshape(-1, 1, 2)
-        cv2.drawContours(
-            annotated,
-            [contour],
-            -1,
-            mode.bins[bin_index].color_bgr,
-            _CONTOUR_THICKNESS,
-            cv2.LINE_AA,
-        )
+        cv2.drawContours(annotated, [contour], -1, color_bgr, _CONTOUR_THICKNESS, cv2.LINE_AA)
     region = result["region"]
     cv2.ellipse(
         annotated,
