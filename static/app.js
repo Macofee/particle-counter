@@ -16,8 +16,8 @@ const BIN_CLASS_MAP = {
 
 function renderBins(bins) {
   const rail = $('#binRail');
-  // 移除旧的分桶卡片，保留合计行
-  rail.querySelectorAll('.bin:not(.total)').forEach((el) => el.remove());
+  // 移除旧的分桶卡片，保留合计行和纤维行
+  rail.querySelectorAll('.bin:not(.total):not(.fiber)').forEach((el) => el.remove());
   bins.forEach((bin) => {
     const card = document.createElement('article');
     card.className = `bin ${BIN_CLASS_MAP[bin.color] || ''}`;
